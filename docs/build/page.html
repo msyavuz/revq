@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<meta name="description" content="How to set up, deploy and use revq, a self-hosted review queue for maintainers.">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="side" aria-label="Sections">
+    <a class="brand" href="./"><img src="icon.svg" alt="" width="26" height="26">revq</a>
+    <ul>
+      {{range .Sections}}<li><a href="#{{.ID}}">{{.Title}}</a></li>
+      {{end}}
+    </ul>
+    <a class="repo" href="https://github.com/msyavuz/revq">Source on GitHub</a>
+  </nav>
+  <main class="doc">
+    <h1>{{.Title}}</h1>
+    {{.Body}}
+  </main>
+</div>
+<script>
+// Mark the section being read in the sidebar.
+const links = new Map([...document.querySelectorAll('.side li a')].map((a) => [a.getAttribute('href').slice(1), a]));
+const seen = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    links.forEach((a) => a.removeAttribute('aria-current'));
+    links.get(e.target.id)?.setAttribute('aria-current', 'true');
+  }
+}, { rootMargin: '0px 0px -75% 0px' });
+document.querySelectorAll('.doc h2[id]').forEach((h) => seen.observe(h));
+</script>
+</body>
+</html>

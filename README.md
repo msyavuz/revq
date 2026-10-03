@@ -6,6 +6,9 @@ A self-hosted review queue for maintainers. revq watches the pull requests waiti
 your review, has Claude Code draft a review for each, and shows what needs you on a
 kanban board. Nothing is posted to GitHub until you approve it, unless you turn that on.
 
+Full setup, deployment and usage: the [revq guide](https://msyavuz.github.io/revq/)
+(source in [docs/guide.md](docs/guide.md)).
+
 ## Run it
 
 On a home server with Docker:
@@ -13,7 +16,8 @@ On a home server with Docker:
     cp .env.example .env       # fill in the tokens, see below
     docker compose up -d --build
 
-Open `http://<server>:8080`, go to Settings, and add a repository. Data is one SQLite
+Open `http://<server>:8080` and sign in as `admin` / `admin`. You're asked to set a new
+password before anything else works. Then go to Settings and add a repository. Data is one SQLite
 file in the `revq-data` volume. To update: `git pull && docker compose up -d --build`.
 
 Locally, using your existing `gh` and `claude` logins:
@@ -27,7 +31,6 @@ Locally, using your existing `gh` and `claude` logins:
 | `GITHUB_TOKEN` | `gh auth token` | Reviews are posted as this token's owner. Read access is enough to draft; posting reviews or labels needs pull request write access. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | local `claude` login | From `claude setup-token`. Uses your Claude subscription. |
 | `ANTHROPIC_API_KEY` | unset | Alternative to the OAuth token, billed per use. |
-| `REVQ_PASSWORD` | unset | Basic-auth password for the UI (any username). Set it if the port is reachable by anyone else. |
 | `REVQ_ADDR` | `127.0.0.1:8080` | Listen address (`:8080` in the Docker image). |
 | `REVQ_DB` | `revq.db` | SQLite file. |
 | `REVQ_CLAUDE_BIN` | `claude` | Path to the Claude Code CLI. |
@@ -38,13 +41,18 @@ Locally, using your existing `gh` and `claude` logins:
 the ones you've already reviewed (the default), or every open PR. It polls GitHub, so it
 works behind NAT with no public URL.
 
-**The board.** Inbox, Needs you, Waiting on author, Ready to merge, Done. Cards place
-themselves from review requests, CI and review state. Drag a card to pin it somewhere
+**The board** reads left to right. A review request lands in Inbox. Once a review is
+drafted the card moves to Needs you. After
+you post, it waits in Waiting on author until they push and ask again, then Ready to
+merge, then Done. Drag a card to pin it somewhere
 until the author pushes again. The bar on each card is the size of the change.
 
-**The agent.** "Draft review" on a card runs a cheap triage (summary, risk, questions
-only you can answer, which files matter) and then a review. You edit the draft, drop
-findings you disagree with, and post it from the PR page.
+**The agent.** "Draft review" on a card has the agent read the diff and write a short
+review made of inline comments: one-line findings anchored to the lines they are about,
+plus any decision only you can make. There is no generated overview comment; the overall
+comment is yours to write if you want one. You edit the draft, drop
+findings you disagree with, and either post it from the PR page or hand it to GitHub as a
+pending review (visible only to you) and finish it there, next to the code.
 
 **Autonomy.** Off by default. Three switches, global with a per-repo override:
 
@@ -59,10 +67,9 @@ PR lands in Needs you.
 ## Token cost
 
 - Syncing uses the GitHub API only. No model is involved.
-- Triage sees the file list and a budgeted excerpt of the diff, with thinking off. A few
-  cents even for a 25k-line PR.
-- Review skips lockfiles, generated and vendored files, packs the rest focus-files-first
-  into a capped number of chunks, and lists anything it left out on the draft.
+- A review is one model call per chunk of diff. It skips lockfiles, generated and
+  vendored files, packs the rest biggest-change-first into a capped number of chunks, and
+  lists anything it left out on the draft.
 - The agent is `claude -p` with no tools, no MCP servers, no settings and its own system
   prompt, so the fixed overhead is about 1k tokens per call. With no tools, text inside a
   PR can't make it do anything.
@@ -74,7 +81,7 @@ on the Settings page.
 
 ## Limits
 
-- GitHub only, one user, one token.
+- GitHub only, one account, one token.
 - The reviewer sees the diff, not a checkout of the repository.
 - No automated tests yet.
 
