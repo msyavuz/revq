@@ -6,7 +6,7 @@ A self-hosted review queue for maintainers. revq watches the pull requests waiti
 your review, has Claude Code draft a review for each, and shows what needs you on a
 kanban board. Nothing is posted to GitHub until you approve it, unless you turn that on.
 
-Full setup, deployment and usage: the [revq guide](https://msyavuz.github.io/revq/)
+Full setup, deployment and usage: the [revq guide](https://revq.dev)
 (source in [docs/guide.md](docs/guide.md)).
 
 ## Run it
