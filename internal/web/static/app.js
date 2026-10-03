@@ -60,3 +60,37 @@ if (themeBtn) {
   });
   show();
 }
+
+// The whole card opens the PR, not just its title. Buttons and links keep
+// their own behaviour, and selecting text on a card doesn't navigate.
+function cardLink(e) {
+  const card = e.target.closest?.('.card');
+  if (!card || e.target.closest('a, button')) return null;
+  if (String(window.getSelection())) return null;
+  return card.querySelector('a.title');
+}
+document.addEventListener('click', (e) => {
+  const link = cardLink(e);
+  if (!link) return;
+  if (e.metaKey || e.ctrlKey || e.shiftKey) window.open(link.href, '_blank');
+  else window.location.href = link.href;
+});
+document.addEventListener('auxclick', (e) => {
+  if (e.button !== 1) return;
+  const link = cardLink(e);
+  if (link) window.open(link.href, '_blank');
+});
+
+// "Ask the author" copies one of the agent's open questions into the summary
+// comment, so it gets posted with the review.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest?.('button[data-ask]');
+  if (!btn) return;
+  const box = document.querySelector('.review textarea[name="body"]');
+  if (!box) return;
+  const have = box.value.trimEnd();
+  box.value = (have ? have + '\n' : '') + '- ' + btn.dataset.ask;
+  btn.disabled = true;
+  btn.textContent = 'Added to the comment';
+  box.focus();
+});

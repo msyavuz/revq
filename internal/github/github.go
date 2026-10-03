@@ -42,6 +42,7 @@ type PR struct {
 	BaseRef        string
 	HeadSHA        string
 	Author         string
+	Avatar         string
 	AuthorAssoc    string
 	IsBot          bool
 	ReviewDecision string
@@ -67,7 +68,7 @@ type ReviewComment struct {
 type Review struct {
 	CommitID string          `json:"commit_id,omitempty"`
 	Body     string          `json:"body"`
-	Event    string          `json:"event"`
+	Event    string          `json:"event,omitempty"` // empty leaves the review pending, visible only to its author
 	Comments []ReviewComment `json:"comments,omitempty"`
 }
 
@@ -116,7 +117,7 @@ const api = "https://api.github.com"
 
 const prFields = `number title body url isDraft createdAt updatedAt
         additions deletions changedFiles baseRefName headRefOid
-        authorAssociation author{login __typename}
+        authorAssociation author{login avatarUrl(size:64) __typename}
         reviewDecision
         labels(first:20){nodes{name}}
         commits(last:1){nodes{commit{statusCheckRollup{state}}}}`
@@ -150,8 +151,9 @@ type prNode struct {
 	HeadRefOid        string
 	AuthorAssociation string
 	Author            *struct {
-		Login    string
-		Typename string `json:"__typename"`
+		Login     string
+		AvatarURL string `json:"avatarUrl"`
+		Typename  string `json:"__typename"`
 	}
 	ReviewDecision string
 	Labels         struct{ Nodes []struct{ Name string } }
@@ -173,6 +175,7 @@ func (n prNode) pr() PR {
 	}
 	if n.Author != nil {
 		p.Author = n.Author.Login
+		p.Avatar = n.Author.AvatarURL
 		p.IsBot = n.Author.Typename == "Bot" || strings.HasSuffix(n.Author.Login, "[bot]")
 	}
 	for _, l := range n.Labels.Nodes {

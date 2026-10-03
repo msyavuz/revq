@@ -1,0 +1,23 @@
+{{define "content"}}
+{{with .Data}}
+<div class="detail settings">
+  <form method="post" action="/account">
+  <section class="panel">
+    <h2>Account</h2>
+    {{if .User.MustChange}}<p class="note">You're still on the default password. Set your own to start using revq.</p>{{end}}
+    <p class="muted">revq has one account. It can post reviews as your GitHub user and spend agent budget, so give it a password you don't use elsewhere.</p>
+    <label>Username<input name="username" value="{{.User.Username}}" autocomplete="username" autocapitalize="none" required></label>
+    <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+    <div class="grid">
+      <label>New password{{if not .User.MustChange}} (leave blank to keep the current one){{end}}
+        <input type="password" name="new_password" autocomplete="new-password" minlength="{{.MinLen}}"{{if .User.MustChange}} required{{end}}></label>
+      <label>New password again
+        <input type="password" name="confirm_password" autocomplete="new-password"{{if .User.MustChange}} required{{end}}></label>
+    </div>
+    <p class="muted">At least {{.MinLen}} characters. Changing it signs out every other browser.</p>
+    <div class="actions"><button class="primary">Save account</button></div>
+  </section>
+  </form>
+</div>
+{{end}}
+{{end}}

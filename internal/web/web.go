@@ -2,19 +2,20 @@
 package web
 
 import (
-	"crypto/subtle"
 	"embed"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
-	"math"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 
 	"github.com/msyavuz/revq/internal/notify"
 	"github.com/msyavuz/revq/internal/pipeline"
@@ -25,18 +26,20 @@ import (
 var assets embed.FS
 
 type Server struct {
-	st       *store.Store
-	eng      *pipeline.Engine
-	log      *slog.Logger
-	password string
-	tpl      map[string]*template.Template
+	st     *store.Store
+	eng    *pipeline.Engine
+	log    *slog.Logger
+	logins *limiter
+	tpl    map[string]*template.Template
 }
 
-func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger, password string) http.Handler {
-	s := &Server{st: st, eng: eng, log: log, password: password, tpl: map[string]*template.Template{}}
+func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger) http.Handler {
+	s := &Server{st: st, eng: eng, log: log, logins: &limiter{fails: map[string][]time.Time{}}, tpl: map[string]*template.Template{}}
 	funcs := template.FuncMap{
 		"ago":      ago,
-		"weight":   weight,
+		"initial":  initial,
+		"markdown": renderMarkdown,
+		"repoName": func(full string) string { return full[strings.LastIndex(full, "/")+1:] },
 		"addShare": addShare,
 		"money":    func(v float64) string { return fmt.Sprintf("$%.2f", v) },
 		"cents":    func(v float64) string { return fmt.Sprintf("$%.3f", v) },
@@ -47,12 +50,19 @@ func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger, password strin
 			return s
 		},
 	}
-	for _, name := range []string{"board", "pr", "settings"} {
+	for _, name := range []string{"board", "pr", "settings", "account"} {
 		s.tpl[name] = template.Must(template.New("").Funcs(funcs).
 			ParseFS(assets, "templates/layout.html", "templates/"+name+".html"))
 	}
 
+	s.tpl["login"] = template.Must(template.New("").Funcs(funcs).ParseFS(assets, "templates/login.html"))
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /login", s.loginPage)
+	mux.HandleFunc("POST /login", s.login)
+	mux.HandleFunc("POST /logout", s.logout)
+	mux.HandleFunc("GET /account", s.account)
+	mux.HandleFunc("POST /account", s.saveAccount)
 	static, _ := fs.Sub(assets, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /{$}", s.board)
@@ -71,33 +81,6 @@ func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger, password strin
 	mux.HandleFunc("POST /repos/{id}/policy", s.repoPolicy)
 	mux.HandleFunc("POST /repos/{id}/delete", s.deleteRepo)
 	return s.guard(mux)
-}
-
-// guard applies optional basic auth and blocks cross-site POSTs.
-func (s *Server) guard(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.password != "" {
-			_, pass, ok := r.BasicAuth()
-			if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(s.password)) != 1 {
-				w.Header().Set("WWW-Authenticate", `Basic realm="revq"`)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" {
-				http.Error(w, "cross-site request blocked", http.StatusForbidden)
-				return
-			}
-			if o := r.Header.Get("Origin"); o != "" {
-				if u, err := url.Parse(o); err != nil || u.Host != r.Host {
-					http.Error(w, "cross-origin request blocked", http.StatusForbidden)
-					return
-				}
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func ago(ts int64) string {
@@ -166,7 +149,9 @@ type card struct {
 	HasDraft   bool
 	DraftStale bool
 	Decision   bool
+	Large      bool
 	Pinned     bool
+	Reviewed   bool // a review was already posted for this exact commit
 }
 
 type column struct {
@@ -174,11 +159,36 @@ type column struct {
 	Cards                   []card
 }
 
-// weight maps a PR's changed-line count to a 6-100 bar width on a log scale,
-// so a 30-line fix and a 30k-line rewrite are both readable at a glance.
-func weight(add, del int) int {
-	w := int(math.Log10(float64(add+del+1)) / math.Log10(30000) * 100)
-	return min(max(w, 6), 100)
+var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
+
+// renderMarkdown turns a PR description into HTML. goldmark drops raw HTML and
+// unsafe link schemes unless told otherwise, which is what makes it safe to
+// mark the result as trusted: the input is whatever a PR author typed.
+func renderMarkdown(src string) template.HTML {
+	var b strings.Builder
+	if err := md.Convert([]byte(src), &b); err != nil {
+		return template.HTML(template.HTMLEscapeString(src))
+	}
+	return template.HTML(b.String())
+}
+
+// shortNote collapses the file list that older drafts stored in their note
+// into the one-line count newer drafts carry.
+func shortNote(note string) string {
+	list, ok := strings.CutPrefix(note, "Not reviewed (over the size budget or no diff): ")
+	if !ok {
+		return note
+	}
+	n := strings.Count(list, ", ") + 1
+	return fmt.Sprintf("Partial review: %d changed files were over the review size budget or had no diff on GitHub, so the agent didn't read them.", n)
+}
+
+// initial is the fallback shown when an author has no profile picture.
+func initial(login string) string {
+	if login == "" {
+		return "?"
+	}
+	return strings.ToUpper(login[:1])
 }
 
 // addShare is the percentage of changed lines that are additions.
@@ -188,6 +198,9 @@ func addShare(add, del int) int {
 	}
 	return add * 100 / (add + del)
 }
+
+// largeChange is the changed-line count from which a card is flagged as large.
+const largeChange = 1500
 
 var riskRank = map[string]int{"high": 0, "medium": 1, "low": 2, "": 3}
 
@@ -206,14 +219,15 @@ func (s *Server) columns() ([]column, error) {
 	}
 	byCol := map[string][]card{}
 	for _, pr := range prs {
-		c := card{PR: pr, Running: active[pr.ID]}
-		if t := pr.Triage; t != nil {
-			c.Risk = t.Risk
-			c.Decision = t.NeedsMaintainer
+		c := card{PR: pr, Running: active[pr.ID], Large: pr.Additions+pr.Deletions >= largeChange}
+		if a := pr.Assessment; a != nil {
+			c.Risk = a.Risk
+			c.Decision = a.NeedsMaintainer
 		}
 		if sha, ok := drafts[pr.ID]; ok {
 			c.HasDraft, c.DraftStale = true, sha != pr.HeadSHA
 		}
+		c.Reviewed = pr.PostedSHA != "" && pr.PostedSHA == pr.HeadSHA
 		c.Pinned = pr.State == "open" && pr.ColOverride != "" && pr.OverrideSHA == pr.HeadSHA
 		col := pr.Col
 		if !pipeline.ValidColumn(col) {
@@ -276,12 +290,31 @@ func (s *Server) pr(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{
 		"PR": pr, "Runs": runs,
-		"Pinned":      pr.ColOverride != "" && pr.OverrideSHA == pr.HeadSHA,
-		"TriageStale": pr.Triage != nil && pr.TriageSHA != pr.HeadSHA,
+		"Pinned": pr.ColOverride != "" && pr.OverrideSHA == pr.HeadSHA,
 	}
+	active, _ := s.st.ActiveRuns()
+	data["Running"] = active[pr.ID]
+	// What the review button should say depends on what already exists.
+	data["ReviewLabel"] = "Draft review"
 	if d, ok := s.st.LatestDraft(pr.ID); ok {
+		stale := d.HeadSHA != pr.HeadSHA
+		d.Notes = shortNote(d.Notes)
 		data["Draft"] = d
-		data["DraftStale"] = d.HeadSHA != pr.HeadSHA
+		data["DraftStale"] = stale
+		switch {
+		case d.Status == "pending":
+			data["ReviewLabel"] = ""
+		case d.Status == "draft" && stale:
+			data["ReviewLabel"] = "Redraft for the new commits"
+			data["ReplacesDraft"] = true
+		case d.Status == "draft":
+			data["ReviewLabel"] = "Redraft review"
+			data["ReplacesDraft"] = true
+		case stale:
+			data["ReviewLabel"] = "Draft review of the new commits"
+		default:
+			data["ReviewLabel"] = "Draft another review"
+		}
 	}
 	s.render(w, r, "pr", fmt.Sprintf("%s#%d", pr.Repo, pr.Number), data)
 }
@@ -315,17 +348,11 @@ func (s *Server) move(w http.ResponseWriter, r *http.Request) {
 func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	kind := r.FormValue("kind")
-	var err error
-	switch kind {
-	case "triage", "review":
-		err = s.eng.Enqueue(id, kind)
-	case "full":
-		err = s.eng.EnqueueFull(id)
-	default:
+	if kind != "review" {
 		http.Error(w, "bad kind", http.StatusBadRequest)
 		return
 	}
-	if err != nil {
+	if err := s.eng.Enqueue(id, kind); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -333,7 +360,7 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		s.boardFragment(w, r)
 		return
 	}
-	msg := "Queued " + kind
+	msg := "Review queued"
 	if s.eng.OverBudget() {
 		msg += " (daily budget reached, it will wait until tomorrow or a higher budget)"
 	}
@@ -361,17 +388,31 @@ func (s *Server) postDraft(w http.ResponseWriter, r *http.Request) {
 		keep = append(keep, f)
 	}
 	dest := fmt.Sprintf("/pr/%d", d.PRID)
-	if err := s.eng.PostDraft(r.Context(), d, event, r.FormValue("body"), keep); err != nil {
-		back(w, r, dest, "Posting failed: "+err.Error())
+	// GitHub rejects a comment-only review that says nothing.
+	if strings.TrimSpace(r.FormValue("body")) == "" && len(keep) == 0 && event != "APPROVE" {
+		back(w, r, dest, "Nothing to send: keep at least one finding or write an overall comment.")
 		return
 	}
-	back(w, r, dest, "Review posted")
+	done := "Review posted"
+	if r.FormValue("pending") != "" {
+		event = ""
+		done = "Sent to GitHub as a pending review. Only you can see it until you submit it there."
+	}
+	if err := s.eng.PostDraft(r.Context(), d, event, r.FormValue("body"), keep); err != nil {
+		back(w, r, dest, "Sending to GitHub failed: "+err.Error())
+		return
+	}
+	back(w, r, dest, done)
 }
 
 func (s *Server) discardDraft(w http.ResponseWriter, r *http.Request) {
 	d, err := s.st.Draft(pathID(r))
 	if err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	if d.Status == "pending" {
+		back(w, r, fmt.Sprintf("/pr/%d", d.PRID), "This review is pending on GitHub. Discard it there.")
 		return
 	}
 	if err := s.st.SetDraftStatus(d.ID, "discarded"); err != nil {
@@ -422,13 +463,11 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return def
 	}
 	c.Policy = formPolicy(r)
-	c.TriageModel = text("triage_model", c.TriageModel)
 	c.ReviewModel = text("review_model", c.ReviewModel)
 	c.PollSeconds = num("poll_seconds", c.PollSeconds)
 	c.StaleDays = num("stale_days", c.StaleDays)
 	c.DailyBudgetUSD = usd("daily_budget_usd", c.DailyBudgetUSD)
 	c.RunBudgetUSD = usd("run_budget_usd", c.RunBudgetUSD)
-	c.TriageDiffChars = num("triage_diff_chars", c.TriageDiffChars)
 	c.ReviewChunkChars = num("review_chunk_chars", c.ReviewChunkChars)
 	c.ReviewMaxChunks = num("review_max_chunks", c.ReviewMaxChunks)
 	c.ReviewBots = r.FormValue("review_bots") != ""

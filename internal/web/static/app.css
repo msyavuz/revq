@@ -106,8 +106,8 @@ button:hover, .btn:hover { border-color: var(--ink); }
 button:active, .btn:active { background: var(--wash); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.htmx-request { opacity: 0.55; pointer-events: none; cursor: progress; }
-button.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-button.primary:hover { background: color-mix(in oklab, var(--ink) 82%, var(--paper)); }
+button.primary, .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+button.primary:hover, .btn.primary:hover { background: color-mix(in oklab, var(--ink) 82%, var(--paper)); }
 button.agent { color: var(--pencil); border-color: var(--pencil); }
 button.agent:hover { background: var(--pencil-wash); border-color: var(--pencil); }
 button.ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
@@ -138,44 +138,61 @@ textarea { font-family: var(--mono); font-size: 0.8125rem; line-height: 1.6; res
 
 .card {
   background: var(--slip); border: 1px solid var(--rule); border-radius: 4px;
-  padding: 12px 14px 10px; cursor: grab;
+  padding: 12px 14px 10px; cursor: pointer;
 }
 .card:hover { border-color: var(--rule-strong); }
-.card.dragging { opacity: 0.35; }
+.card.dragging { opacity: 0.35; cursor: grabbing; }
+.card:hover .title { text-decoration: underline; }
 
-/* the size bar: length is how big the change is (log scale), the split is
-   additions versus deletions. A huge PR looks heavy before you read a word. */
-.weight {
-  height: 5px; width: var(--w); min-width: 10px; border-radius: 1px; margin-bottom: 10px;
+.ref { display: flex; align-items: baseline; color: var(--ink-2); min-width: 0; }
+.ref .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref .num { font-family: var(--mono); font-size: 0.8125rem; flex: none; }
+.card .gh { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: -4px; border-radius: 4px; color: var(--ink-2); }
+.card .gh:hover { color: var(--ink); background: var(--wash); }
+.ref .diff { margin-left: auto; padding-left: 10px; flex: none; }
+/* a small add/delete split next to the numbers, the way a diffstat shows it */
+.split {
+  display: inline-block; width: 28px; height: 6px; border-radius: 1px; margin-left: 7px;
   background: linear-gradient(to right, var(--add) 0 var(--a), var(--del) var(--a) 100%);
 }
-.size { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.size .track { flex: 1; min-width: 0; }
-.size .weight { margin: 0; }
-.ref { display: flex; align-items: baseline; gap: 10px; color: var(--ink-2); min-width: 0; }
-.ref .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar {
+  width: 20px; height: 20px; border-radius: 50%; flex: none; object-fit: cover;
+  background: var(--wash); box-shadow: 0 0 0 1px var(--rule);
+  display: inline-grid; place-items: center; font-size: 0.6875rem; font-weight: 700; color: var(--ink-2);
+}
+.person { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .diff { white-space: nowrap; }
 .diff .add { color: var(--add); }
 .diff .del { color: var(--del); }
 .card .title { display: block; font-weight: 650; line-height: 1.3; text-decoration: none; margin: 5px 0 0; overflow-wrap: anywhere; }
 .card .title:hover { text-decoration: underline; }
-.card .sum {
-  margin: 6px 0 0; color: var(--ink-2); font-size: 0.875rem; line-height: 1.45;
-  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-}
+.card .sum { margin: 8px 0 0; color: var(--ink); font-size: 0.875rem; line-height: 1.45; }
+.card .sum span { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .card .marks { margin-top: 10px; }
 .card .foot {
   display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px;
   border-top: 1px solid var(--rule); color: var(--ink-2); font-size: 0.8125rem; min-height: 34px;
 }
-.card .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card .when { white-space: nowrap; margin-right: auto; }
+.card .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 550; }
+.card .when { white-space: nowrap; margin-left: auto; }
+.card .foot button.mini { margin-left: auto; }
+.card .foot .ci { margin-left: -2px; }
 button.mini {
   font-size: 0.8125rem; padding: 2px 9px; background: transparent;
   color: var(--pencil); border-color: transparent;
 }
 button.mini:hover, .card:hover button.mini { border-color: var(--pencil); }
 button.mini:hover { background: var(--pencil-wash); }
+/* With a mouse the button takes the place of the age while you're on the card,
+   so the author's name keeps its room. Touch screens always show the button. */
+@media (hover: hover) {
+  .card .foot button.mini { display: none; }
+  .card:hover .foot button.mini, .card:focus-within .foot button.mini { display: inline-block; }
+  .card:hover .foot:has(.mini) .when, .card:focus-within .foot:has(.mini) .when { display: none; }
+}
+@media (hover: none) {
+  .card .foot:has(.mini) .when { display: none; }
+}
 .ci { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--rule-strong); }
 .ci-success { background: var(--add); }
 .ci-failure { background: var(--del); }
@@ -193,21 +210,65 @@ button.mini:hover { background: var(--pencil-wash); }
 .mark.risk-medium, .mark.sev-major { background: var(--wait-wash); color: var(--wait); }
 .mark.risk-low { background: var(--add-wash); color: var(--add); }
 
+/* Who wrote what. Anything the agent wrote sits on a blue-pencil wash; the
+   author's own words sit on a plain slip with their picture, like a comment. */
+.byline { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.8125rem; font-weight: 600; }
+.by-agent { background: var(--pencil-wash); border-radius: 8px; padding: 16px 24px 22px; margin-top: 20px; }
+.by-agent > .byline { color: var(--pencil); margin-bottom: 12px; }
+.by-agent.empty-agent { padding-bottom: 4px; }
+.by-agent label { display: block; margin: 14px 0; color: var(--ink-2); font-size: 0.875rem; font-weight: 550; }
+.by-agent label > textarea { margin-top: 6px; font-weight: 400; }
+.by-agent label.pick { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); font-weight: 400; margin: 0; }
+.by-agent label.pick input { margin: 2px 0 0; }
+.by-agent label.pick code { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.by-agent label.pick .mark { flex: none; }
+.by-agent label.overall { margin-top: 20px; padding-top: 14px; border-top: 1px solid color-mix(in oklab, var(--pencil) 22%, transparent); }
+.by-agent .sent { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 70ch; }
+.by-agent .marks:empty { display: none; }
+.by-agent .mark:not(.hl, .agent, [class*="risk-"], [class*="sev-"]) { background: var(--slip); }
+.by-agent .mark.agent { background: var(--slip); }
+.by-agent .finding, .by-agent .ask li { border-top-color: color-mix(in oklab, var(--pencil) 22%, transparent); }
+.from-pr { background: var(--slip); border: 1px solid var(--rule); border-radius: 8px; }
+.from-pr > .byline { padding: 12px 20px; border-bottom: 1px solid var(--rule); font-weight: 400; color: var(--ink-2); }
+.from-pr > .byline strong { color: var(--ink); }
+.from-pr > .md, .from-pr > p.muted { padding: 14px 20px 18px; margin: 0; }
+
+/* rendered PR description */
+.md { overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4 { font-size: 1rem; font-weight: 700; letter-spacing: 0; margin: 18px 0 6px; }
+.md p, .md li { max-width: 72ch; }
+.md ul, .md ol { padding-left: 22px; margin: 6px 0; }
+.md li { margin: 2px 0; }
+.md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -22px; }
+.md li input[type="checkbox"] { margin-right: 6px; vertical-align: -2px; }
+.md a { color: var(--pencil); }
+.md code { background: var(--wash); padding: 1px 5px; border-radius: 3px; }
+.md pre { background: var(--wash); padding: 10px 12px; border-radius: 4px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; }
+.md blockquote { margin: 8px 0; padding: 2px 14px; color: var(--ink-2); background: var(--wash); border-radius: 4px; }
+.md img { max-width: 100%; height: auto; }
+.md table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--rule); padding: 4px 10px; text-align: left; }
+.md hr { border: 0; border-top: 1px solid var(--rule); margin: 14px 0; }
+.card .sum { background: var(--pencil-wash); padding: 6px 8px; border-radius: 3px; }
+
 /* PR page: reading column plus a facts rail */
 .pr {
   max-width: 1180px; margin: 0 auto; padding: 36px 24px 80px;
   display: grid; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 56px;
 }
 .pr-head { grid-column: 1 / -1; padding-bottom: 28px; border-bottom: 1px solid var(--ink); }
-.pr-head .ref { margin-bottom: 8px; }
+.pr-head .ref { justify-content: flex-start; margin-bottom: 8px; }
 .pr-head h1 { max-width: 30ch; }
-.pr-main { min-width: 0; }
+.pr-main { min-width: 0; padding-top: 28px; }
 .pr-rail { padding-top: 28px; font-size: 0.875rem; }
-.pr-rail .weight { height: 8px; margin-bottom: 18px; }
 .facts { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px 12px; margin: 0; }
 .facts dt { color: var(--ink-2); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
-.pr-rail h3 { margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.pr-rail h3 { margin-top: 0; margin-bottom: 12px; }
+.pr-rail .agent-title { margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--pencil); }
 .runs { list-style: none; margin: 10px 0 0; padding: 0; }
 .runs li { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; padding: 8px 0; border-top: 1px solid var(--rule); }
 .runs li:first-child { border-top: 0; padding-top: 0; }
@@ -231,14 +292,33 @@ button.mini:hover { background: var(--pencil-wash); }
 .panel label.pick { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .panel label.pick input { margin-right: 2px; }
 .ask { list-style: none; padding: 0; margin: 8px 0 0; }
-.ask li { padding: 10px 0; border-top: 1px solid var(--rule); font-weight: 600; }
+.ask li { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--rule); font-weight: 600; }
+.ask li button { flex: none; font-size: 0.8125rem; padding: 3px 10px; }
+.decide-help { margin: 4px 0 0; color: var(--ink-2); font-size: 0.875rem; }
 .ask li:first-child { border-top: 0; padding-top: 2px; }
 .files { list-style: none; padding: 0; }
 .files li { padding: 2px 0; overflow-wrap: anywhere; }
-.note { background: var(--wait-wash); color: var(--wait); padding: 9px 12px; border-radius: 4px; font-size: 0.875rem; font-weight: 550; overflow-wrap: anywhere; }
+.note { background: var(--wait-wash); color: var(--wait); padding: 9px 12px; border-radius: 4px; font-size: 0.875rem; font-weight: 550; overflow-wrap: anywhere;  }
 .body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; max-height: 440px; overflow: auto; line-height: 1.6; color: var(--ink-2); }
 .finding { border-top: 1px solid var(--rule); padding-top: 12px; margin: 14px 0; }
-.finding textarea { margin-top: 8px; }
+.finding textarea { margin-top: 8px; field-sizing: content; min-height: 4.4em; }
+/* the diff lines a comment is anchored to; the highlighted number is the line itself */
+.snippet {
+  margin-top: 8px; background: var(--slip); border: 1px solid var(--rule); border-radius: 6px;
+  overflow-x: auto; padding: 4px 0;
+}
+.snippet .ln { display: flex; min-width: max-content; }
+.snippet .no {
+  flex: none; width: 4.2em; padding: 0 10px 0 8px; text-align: right; user-select: none;
+  font-family: var(--mono); font-size: 0.75rem; line-height: 1.6; color: var(--ink-2);
+}
+.snippet code { white-space: pre; line-height: 1.6; padding-right: 14px; tab-size: 4; }
+.snippet code::before { content: " "; display: inline-block; width: 1.4em; color: var(--ink-2); }
+.snippet .k-add { background: var(--add-wash); }
+.snippet .k-add code::before { content: "+"; color: var(--add); }
+.snippet .k-del { background: var(--del-wash); }
+.snippet .k-del code::before { content: "−"; color: var(--del); }
+.snippet .target .no { background: var(--hl); color: var(--hl-ink); font-weight: 700; }
 .finding code { overflow-wrap: anywhere; color: var(--ink); }
 .review { display: block; }
 .review select { width: auto; }
@@ -274,3 +354,13 @@ button.mini:hover { background: var(--pencil-wash); }
   .col { scroll-snap-align: center; padding: 18px 12px 32px; }
   .pr, .detail { padding-left: 16px; padding-right: 16px; }
 }
+
+/* sign in */
+.login-page { display: grid; place-items: center; min-height: 100dvh; padding: 24px; }
+.login { width: min(100%, 360px); }
+.login .brand { font-size: 1.5rem; margin-bottom: 36px; }
+.login h1 { font-size: 1.5rem; margin-bottom: 16px; }
+.login label { display: block; margin: 16px 0; color: var(--ink-2); font-size: 0.875rem; font-weight: 550; }
+.login label input { margin-top: 6px; padding: 9px 12px; font-weight: 400; }
+.login button { width: 100%; padding: 10px 12px; margin-top: 8px; }
+.login-error { background: var(--del-wash); color: var(--del); padding: 9px 12px; border-radius: 4px; font-weight: 550; }

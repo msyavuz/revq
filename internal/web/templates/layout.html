@@ -17,6 +17,7 @@
   <nav>
     <a href="/"{{if eq .Title "Board"}} aria-current="page"{{end}}>Board</a>
     <a href="/settings"{{if eq .Title "Settings"}} aria-current="page"{{end}}>Settings</a>
+    <a href="/account"{{if eq .Title "Account"}} aria-current="page"{{end}}>Account</a>
   </nav>
   <div class="meter{{if .OverBudget}} over{{end}}" title="Agent spend today, out of the daily budget">
     <span>{{money .Spend}} of {{money .Budget}} today</span>
@@ -25,6 +26,7 @@
   </div>
   <button type="button" class="ghost theme" id="theme" title="Switch between following the system, light and dark">Auto</button>
   <form method="post" action="/poll"><button>Sync now</button></form>
+  <form method="post" action="/logout"><button class="ghost">Sign out</button></form>
 </header>
 {{if .Flash}}<div class="flash" role="status">{{.Flash}}</div>{{end}}
 <main>{{template "content" .}}</main>

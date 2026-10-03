@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -46,7 +47,29 @@ func main() {
 	}
 }
 
+// resetPassword is the way back in after a forgotten password.
+func resetPassword() error {
+	st, err := store.Open(env("REVQ_DB", "revq.db"))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if err := st.ResetUser(); err != nil {
+		return err
+	}
+	fmt.Println("Account reset. Sign in as admin / admin and set a new password.")
+	return nil
+}
+
 func run(log *slog.Logger) error {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "reset-password":
+			return resetPassword()
+		default:
+			return fmt.Errorf("unknown command %q (the only command is reset-password)", os.Args[1])
+		}
+	}
 	token := githubToken()
 	if token == "" {
 		return errors.New("no GitHub token: set GITHUB_TOKEN or log in with gh")
@@ -56,6 +79,11 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	defer st.Close()
+	if u, err := st.User(); err != nil {
+		return err
+	} else if u.MustChange {
+		log.Warn("account still has the default password; sign in as admin / admin to set a new one")
+	}
 	ag, err := agent.NewClaudeCode(os.Getenv("REVQ_CLAUDE_BIN"))
 	if err != nil {
 		return err
@@ -70,7 +98,7 @@ func run(log *slog.Logger) error {
 	addr := env("REVQ_ADDR", "127.0.0.1:8080")
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           web.New(st, eng, log, os.Getenv("REVQ_PASSWORD")),
+		Handler:           web.New(st, eng, log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

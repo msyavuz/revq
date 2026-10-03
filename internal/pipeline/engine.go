@@ -72,21 +72,6 @@ func (e *Engine) Enqueue(prID int64, kind string) error {
 	return nil
 }
 
-// EnqueueFull queues a triage (if the current commit has none) followed by a
-// review. Triage runs first, so the review gets its focus files.
-func (e *Engine) EnqueueFull(prID int64) error {
-	pr, err := e.St.PR(prID)
-	if err != nil {
-		return err
-	}
-	if pr.TriageSHA != pr.HeadSHA {
-		if _, err := e.St.EnqueueRun(prID, "triage", pr.HeadSHA); err != nil {
-			return err
-		}
-	}
-	return e.Enqueue(prID, "review")
-}
-
 // --- sync
 
 func (e *Engine) pollLoop(ctx context.Context) {
@@ -135,6 +120,7 @@ func (e *Engine) syncRepo(ctx context.Context, r store.Repo) error {
 			HeadSHA: g.HeadSHA, BaseRef: g.BaseRef, Additions: g.Additions, Deletions: g.Deletions,
 			ChangedFiles: g.ChangedFiles, CI: g.CI, ReviewState: g.ReviewDecision, Labels: g.Labels,
 			CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix(), Requested: requested[g.Number],
+			Avatar: g.Avatar,
 		})
 		if err != nil {
 			return err
@@ -145,16 +131,11 @@ func (e *Engine) syncRepo(ctx context.Context, r store.Repo) error {
 		}
 		if pr.Requested == 0 {
 			// I answered on GitHub directly, so an unposted draft is moot.
-			if err := e.St.DiscardPendingDrafts(id); err != nil {
+			if err := e.St.SettleDrafts(id); err != nil {
 				return err
 			}
 		}
 		if policy.AutoReview && e.wantsAutoReview(pr, cfg) {
-			if pr.TriageSHA != pr.HeadSHA {
-				if _, err := e.St.EnqueueRun(id, "triage", pr.HeadSHA); err != nil {
-					return err
-				}
-			}
 			if _, err := e.St.EnqueueRun(id, "review", pr.HeadSHA); err != nil {
 				return err
 			}
@@ -242,10 +223,8 @@ func (e *Engine) RefreshColumn(ctx context.Context, prID int64) {
 		return
 	}
 	drafts, _ := e.St.PendingDrafts()
-	active, _ := e.St.ActiveRuns()
 	_, pending := drafts[prID]
-	_, running := active[prID]
-	col := Column(pr, pending, running)
+	col := Column(pr, pending)
 	if col == pr.Col {
 		return
 	}
@@ -261,7 +240,7 @@ func (e *Engine) RefreshColumn(ctx context.Context, prID int64) {
 	switch {
 	case pending:
 		reason = "draft review waiting for approval"
-	case pr.Triage != nil && pr.Triage.NeedsMaintainer:
+	case pr.Assessment != nil && pr.Assessment.NeedsMaintainer:
 		reason = "maintainer decision needed"
 	}
 	if err := e.Notify(ctx, notify.Event{Repo: pr.Repo, Number: pr.Number, Title: pr.Title, URL: pr.URL, Reason: reason}); err != nil {
@@ -305,8 +284,6 @@ func (e *Engine) workLoop(ctx context.Context) {
 		e.RefreshColumn(ctx, run.PRID)
 		var err error
 		switch run.Kind {
-		case "triage":
-			err = e.triage(ctx, &run)
 		case "review":
 			err = e.review(ctx, &run)
 		default:
@@ -377,45 +354,6 @@ func (e *Engine) repoLabels(ctx context.Context, pr store.PR) []string {
 	return l
 }
 
-func (e *Engine) triage(ctx context.Context, run *store.Run) error {
-	cfg := e.St.Config()
-	run.Model = cfg.TriageModel
-	pr, files, noise, err := e.load(ctx, run)
-	if err != nil {
-		return err
-	}
-	policy := e.St.PolicyFor(pr.RepoID)
-	var labels []string
-	if policy.AutoLabel {
-		labels = e.repoLabels(ctx, pr)
-	}
-	var t store.Triage
-	err = e.call(ctx, run, agent.Request{
-		System:     triageSystem,
-		Prompt:     triagePrompt(pr, fileList(files, noise, 300), excerpt(files, noise, cfg.TriageDiffChars), labels),
-		Model:      cfg.TriageModel,
-		Schema:     triageSchema,
-		BudgetUSD:  cfg.RunBudgetUSD,
-		NoThinking: true,
-	}, &t)
-	if err != nil {
-		return err
-	}
-	if err := e.St.SetTriage(pr.ID, t, pr.HeadSHA); err != nil {
-		return err
-	}
-
-	if policy.AutoLabel {
-		if add := newLabels(t.SuggestedLabels, labels, pr.Labels); len(add) > 0 {
-			owner, name, _ := store.SplitRepo(pr.Repo)
-			if err := e.GH.AddLabels(ctx, owner, name, pr.Number, add); err != nil {
-				e.Log.Warn("add labels", "pr", pr.Number, "err", err)
-			}
-		}
-	}
-	return nil
-}
-
 // newLabels keeps suggestions that exist in the repo and aren't on the PR yet.
 func newLabels(suggested, repo, have []string) []string {
 	ok := map[string]bool{}
@@ -456,6 +394,8 @@ func (e *Engine) wantsAutoReview(pr store.PR, cfg store.Config) bool {
 
 var verdictRank = map[string]int{"APPROVE": 0, "COMMENT": 1, "REQUEST_CHANGES": 2}
 
+var riskRank = map[string]int{"low": 0, "medium": 1, "high": 2}
+
 func (e *Engine) review(ctx context.Context, run *store.Run) error {
 	cfg := e.St.Config()
 	run.Model = cfg.ReviewModel
@@ -463,31 +403,36 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 	if err != nil {
 		return err
 	}
-	var focus []string
-	maxChunks := max(cfg.ReviewMaxChunks, 1)
-	if t := pr.Triage; t != nil {
-		focus = t.FocusFiles
-		if t.ReviewDepth == "light" {
-			maxChunks = 1
-		}
-	}
-	plan := planReview(files, noise, focus, max(cfg.ReviewChunkChars, 4000), maxChunks)
+	plan := planReview(files, noise, max(cfg.ReviewChunkChars, 4000), max(cfg.ReviewMaxChunks, 1))
 	if len(plan.Chunks) == 0 {
 		return errors.New("nothing reviewable in this PR (only generated files or no diff)")
 	}
+	policy := e.St.PolicyFor(pr.RepoID)
+	var labels []string
+	if policy.AutoLabel {
+		labels = e.repoLabels(ctx, pr)
+	}
+	// A partial view needs the whole file list to know what it isn't seeing.
+	overview := ""
+	if len(plan.Chunks) > 1 || len(plan.Skipped) > 0 {
+		overview = fileList(files, noise, 150)
+	}
 
 	draft := store.Draft{PRID: pr.ID, HeadSHA: pr.HeadSHA, Verdict: "APPROVE"}
-	var summaries, questions []string
+	read := store.Assessment{Risk: "low"}
+	var summaries []string
 	for i, chunk := range plan.Chunks {
 		var out struct {
-			Summary   string          `json:"summary"`
-			Verdict   string          `json:"verdict"`
-			Findings  []store.Finding `json:"findings"`
-			Questions []string        `json:"questions"`
+			Summary             string          `json:"summary"`
+			Risk                string          `json:"risk"`
+			Verdict             string          `json:"verdict"`
+			Findings            []store.Finding `json:"findings"`
+			MaintainerQuestions []string        `json:"maintainer_questions"`
+			SuggestedLabels     []string        `json:"suggested_labels"`
 		}
 		err := e.call(ctx, run, agent.Request{
 			System:    reviewSystem,
-			Prompt:    reviewPrompt(pr, chunk, i+1, len(plan.Chunks), cfg.Guidelines),
+			Prompt:    reviewPrompt(pr, chunk, overview, i+1, len(plan.Chunks), cfg.Guidelines, labels),
 			Model:     cfg.ReviewModel,
 			Schema:    reviewSchema,
 			BudgetUSD: cfg.RunBudgetUSD,
@@ -496,12 +441,17 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 			return fmt.Errorf("chunk %d/%d: %w", i+1, len(plan.Chunks), err)
 		}
 		summaries = append(summaries, out.Summary)
-		questions = append(questions, out.Questions...)
 		if verdictRank[out.Verdict] > verdictRank[draft.Verdict] {
 			draft.Verdict = out.Verdict
 		}
+		if riskRank[out.Risk] > riskRank[read.Risk] {
+			read.Risk = out.Risk
+		}
+		read.MaintainerQuestions = append(read.MaintainerQuestions, out.MaintainerQuestions...)
+		read.SuggestedLabels = append(read.SuggestedLabels, out.SuggestedLabels...)
 		for _, f := range out.Findings {
 			f.Inline = plan.Valid[f.Path][f.Line]
+			f.Snippet = snippet(plan.Patch[f.Path], f.Line, 4, 1)
 			draft.Findings = append(draft.Findings, f)
 		}
 	}
@@ -509,39 +459,51 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 	if len(plan.Skipped) > 0 && draft.Verdict == "APPROVE" {
 		draft.Verdict = "COMMENT"
 	}
+	// The review is its inline comments; the overall comment starts empty and
+	// is the maintainer's to write.
+	if n := len(plan.Skipped); n > 0 {
+		draft.Notes = fmt.Sprintf("Partial review: the agent read %d of %d changed files. The other %d were over the review size budget or had no diff on GitHub.",
+			len(plan.Valid), len(plan.Valid)+n, n)
+	}
 
-	var body strings.Builder
-	body.WriteString(strings.Join(summaries, "\n\n"))
-	if len(questions) > 0 {
-		body.WriteString("\n\n**Questions**\n")
-		for _, q := range questions {
-			fmt.Fprintf(&body, "- %s\n", q)
+	read.Summary = summaries[0]
+	read.NeedsMaintainer = len(read.MaintainerQuestions) > 0
+	if err := e.St.SetAssessment(pr.ID, read, pr.HeadSHA); err != nil {
+		return err
+	}
+	if policy.AutoLabel {
+		if add := newLabels(read.SuggestedLabels, labels, pr.Labels); len(add) > 0 {
+			owner, name, _ := store.SplitRepo(pr.Repo)
+			if err := e.GH.AddLabels(ctx, owner, name, pr.Number, add); err != nil {
+				e.Log.Warn("add labels", "pr", pr.Number, "err", err)
+			}
 		}
 	}
-	draft.Body = strings.TrimSpace(body.String())
-	if len(plan.Skipped) > 0 {
-		draft.Notes = "Not reviewed (over the size budget or no diff): " + strings.Join(plan.Skipped, ", ")
-	}
+
 	id, err := e.St.CreateDraft(draft)
 	if err != nil {
 		return err
 	}
-
-	if e.St.PolicyFor(pr.RepoID).AutoPost {
+	if policy.AutoPost {
 		d, err := e.St.Draft(id)
 		if err != nil {
 			return err
 		}
 		// Unattended posts never approve or block; that stays a human call.
-		if err := e.PostDraft(ctx, d, "COMMENT", d.Body+autoPostFooter, d.Findings); err != nil {
+		if len(d.Findings) == 0 {
+			return nil // nothing to say; leave the draft for the maintainer
+		}
+		if err := e.PostDraft(ctx, d, "COMMENT", strings.TrimSpace(autoPostFooter), d.Findings); err != nil {
 			return fmt.Errorf("auto-post: %w", err)
 		}
 	}
 	return nil
 }
 
-// PostDraft publishes a review to GitHub. Findings on lines GitHub can't anchor
-// are folded into the body instead of being dropped.
+// PostDraft sends a review to GitHub. With an event (COMMENT, APPROVE,
+// REQUEST_CHANGES) it is published. With an empty event it becomes a pending
+// review that only the maintainer can see, to be finished in GitHub's own UI.
+// Findings on lines GitHub can't anchor are folded into the body, not dropped.
 func (e *Engine) PostDraft(ctx context.Context, d store.Draft, event, body string, findings []store.Finding) error {
 	pr, err := e.St.PR(d.PRID)
 	if err != nil {
@@ -576,6 +538,10 @@ func (e *Engine) PostDraft(ctx context.Context, d store.Draft, event, body strin
 	}
 	if err != nil {
 		return err
+	}
+	if event == "" {
+		// Not published yet, so the card stays with the maintainer.
+		return e.St.SetDraftStatus(d.ID, "pending")
 	}
 	if err := e.St.SetDraftStatus(d.ID, "posted"); err != nil {
 		return err

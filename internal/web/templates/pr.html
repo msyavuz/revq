@@ -1,3 +1,5 @@
+{{define "snippet"}}{{if .}}<div class="snippet" role="img" aria-label="The code this comment is about">{{range .}}<div class="ln k-{{.Kind}}{{if .Target}} target{{end}}"><span class="no">{{if .N}}{{.N}}{{end}}</span><code>{{.Text}}</code></div>{{end}}</div>{{end}}{{end}}
+
 {{define "content"}}
 {{with .Data}}
 <div class="pr">
@@ -6,49 +8,56 @@
     <h1>{{.PR.Title}}</h1>
     <div class="actions">
       <a class="btn" href="{{.PR.URL}}" target="_blank" rel="noopener">Open on GitHub</a>
-      <form method="post" action="/pr/{{.PR.ID}}/run"><input type="hidden" name="kind" value="review"><button class="agent">Draft review</button></form>
-      <form method="post" action="/pr/{{.PR.ID}}/run"><input type="hidden" name="kind" value="triage"><button class="agent">Triage only</button></form>
+      {{if .Running}}
+      <button class="agent" disabled hx-get="/pr/{{.PR.ID}}" hx-trigger="every 6s" hx-select=".pr" hx-target=".pr" hx-swap="outerHTML">{{if eq .Running "running"}}The agent is reviewing this{{else}}Queued for the agent{{end}}</button>
+      {{else if .ReviewLabel}}
+      <form method="post" action="/pr/{{.PR.ID}}/run"{{if .ReplacesDraft}} onsubmit="return confirm('This replaces the current draft, including any edits you made to it.')"{{end}}><input type="hidden" name="kind" value="review"><button class="agent">{{.ReviewLabel}}</button></form>
+      {{end}}
       {{if .Pinned}}<form method="post" action="/pr/{{.PR.ID}}/move"><input type="hidden" name="col" value="auto"><button class="ghost">Unpin from column</button></form>{{end}}
     </div>
   </header>
 
   <div class="pr-main">
-    <section class="panel">
-      <h2>Triage{{if .TriageStale}} <span class="mark">from {{short .PR.TriageSHA}}, new commits since</span>{{end}}</h2>
-      {{with .PR.Triage}}
-        <p class="lede">{{.Summary}}</p>
-        <div class="marks">
-          <span class="mark risk-{{.Risk}}">{{.Risk}} risk</span>
-          <span class="mark">{{.Category}}</span>
-          <span class="mark">suggested review: {{.ReviewDepth}}</span>
-        </div>
-        {{if .MaintainerQuestions}}<h3><span class="hl">Needs your call</span></h3><ul class="ask">{{range .MaintainerQuestions}}<li>{{.}}</li>{{end}}</ul>{{end}}
-        {{if .RiskReasons}}<h3>Why this risk</h3><ul>{{range .RiskReasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
-        {{if .SplitSuggestion}}<h3>Split suggestion</h3><p>{{.SplitSuggestion}}</p>{{end}}
-        {{if .FocusFiles}}<h3>Where to look</h3><ul class="files">{{range .FocusFiles}}<li>{{.}}</li>{{end}}</ul>{{end}}
-        {{if .SuggestedLabels}}<h3>Suggested labels</h3><div class="marks">{{range .SuggestedLabels}}<span class="mark">{{.}}</span>{{end}}</div>{{end}}
-      {{else}}
-        <p class="muted">Not triaged yet. "Draft review" runs triage first.</p>
-      {{end}}
+    <section class="from-pr">
+      <p class="byline">{{if .PR.Avatar}}<img class="avatar" src="{{.PR.Avatar}}" alt="" width="20" height="20">{{else}}<span class="avatar">{{initial .PR.Author}}</span>{{end}}<span><strong>{{.PR.Author}}</strong> wrote this in the pull request</span></p>
+      {{if .PR.Body}}<div class="md">{{markdown .PR.Body}}</div>{{else}}<p class="muted">The pull request has no description.</p>{{end}}
     </section>
 
     {{with .Draft}}
-    <section class="panel">
-      <h2>Review {{if eq .Status "posted"}}<span class="mark">posted {{ago .PostedAt}}</span>{{else}}<span class="mark agent">drafted by the agent, not posted</span>{{end}}
-        {{if $.Data.DraftStale}}<span class="mark risk-medium">written for {{short .HeadSHA}}, new commits since</span>{{end}}</h2>
+    <section class="by-agent">
+      <p class="byline"><img src="/static/icon.svg" alt="" width="18" height="18">
+        {{if eq .Status "posted"}}revq's review, posted {{ago .PostedAt}}
+        {{else if eq .Status "pending"}}revq's review, pending on GitHub and visible only to you
+        {{else}}revq's draft review. Not on GitHub until you post it.{{end}}</p>
+      <div class="marks">
+        {{with $.Data.PR.Assessment}}{{if .Risk}}<span class="mark risk-{{.Risk}}">{{.Risk}} risk</span>{{end}}{{end}}
+        {{if $.Data.DraftStale}}<span class="mark risk-medium">written for {{short .HeadSHA}}, new commits since</span>{{end}}
+      </div>
       {{if .Notes}}<p class="note">{{.Notes}}</p>{{end}}
+      {{with $.Data.PR.Assessment}}{{if .MaintainerQuestions}}
+      <h3><span class="hl">Decide before you post</span></h3>
+      <p class="decide-help">The agent can't settle these; they're judgement calls for you as maintainer. They are not part of the review. Decide, then say so in the overall comment, or pass a question on to the author.</p>
+      <ul class="ask">{{range .MaintainerQuestions}}<li><span>{{.}}</span>{{if eq $.Data.Draft.Status "draft"}}<button type="button" data-ask="{{.}}" title="Adds this question to the overall comment below">Ask the author</button>{{end}}</li>{{end}}</ul>
+      {{end}}{{end}}
+
+      {{if eq .Status "pending"}}
+      <p>Check the comments against the code on GitHub, then submit from the "Finish your review" button there.</p>
+      <div class="actions"><a class="btn primary" href="{{$.Data.PR.URL}}/files" target="_blank" rel="noopener">Finish the review on GitHub</a></div>
+      {{end}}
+
       {{if eq .Status "draft"}}
       <form method="post" action="/draft/{{.ID}}/post" class="review">
-        <label>Summary comment<textarea name="body" rows="14">{{.Body}}</textarea></label>
-        {{if .Findings}}<h3>Findings <span class="muted">untick to drop, edit freely</span></h3>{{end}}
+        {{if .Findings}}<h3>Inline comments <span class="muted">untick to drop, edit freely</span></h3>{{else}}<p class="muted">The agent found nothing to comment on.</p>{{end}}
         {{range $i, $f := .Findings}}
         <div class="finding">
           <label class="pick"><input type="checkbox" name="f{{$i}}" checked>
             <code>{{$f.Path}}:{{$f.Line}}</code> <span class="mark sev-{{$f.Severity}}">{{$f.Severity}}</span>
             {{if not $f.Inline}}<span class="mark" title="This line is not in the diff, so the finding goes into the summary comment">not inline</span>{{end}}</label>
-          <textarea name="fb{{$i}}" rows="3">{{$f.Body}}</textarea>
+          {{template "snippet" $f.Snippet}}
+          <textarea name="fb{{$i}}" rows="4">{{$f.Body}}</textarea>
         </div>
         {{end}}
+        <label class="overall">Overall comment <span class="muted">optional, posted above the inline comments</span><textarea name="body" rows="2">{{.Body}}</textarea></label>
         <div class="actions">
           <select name="verdict" aria-label="Review type">
             <option value="COMMENT"{{if eq .Verdict "COMMENT"}} selected{{end}}>Comment</option>
@@ -56,26 +65,27 @@
             <option value="APPROVE"{{if eq .Verdict "APPROVE"}} selected{{end}}>Approve</option>
           </select>
           <button class="primary">Post review to GitHub</button>
+          <button name="pending" value="1" title="Puts the summary and findings on the PR as a pending review that only you can see, so you can check them against the code and submit from GitHub">Continue on GitHub</button>
           <button class="ghost" formaction="/draft/{{.ID}}/discard">Discard draft</button>
         </div>
       </form>
       {{else}}
-        <pre class="body">{{.Body}}</pre>
-        {{range .Findings}}<div class="finding"><code>{{.Path}}:{{.Line}}</code> <span class="mark sev-{{.Severity}}">{{.Severity}}</span><p>{{.Body}}</p></div>{{end}}
+        {{if .Body}}<p class="sent">{{.Body}}</p>{{end}}
+        {{range .Findings}}<div class="finding"><code>{{.Path}}:{{.Line}}</code> <span class="mark sev-{{.Severity}}">{{.Severity}}</span>{{template "snippet" .Snippet}}<p>{{.Body}}</p></div>{{end}}
       {{end}}
     </section>
-    {{end}}
-
-    {{if .PR.Body}}
-    <section class="panel"><h2>Description</h2><pre class="body">{{.PR.Body}}</pre></section>
+    {{else}}
+    <section class="by-agent empty-agent">
+      <p class="byline"><img src="/static/icon.svg" alt="" width="18" height="18">No review drafted yet. Press "Draft review" and the agent's draft appears here.</p>
+    </section>
     {{end}}
   </div>
 
   <aside class="pr-rail">
-    <div class="weight" style="--w: {{weight .PR.Additions .PR.Deletions}}%; --a: {{addShare .PR.Additions .PR.Deletions}}%"></div>
+    <h3 class="rail-title">From GitHub</h3>
     <dl class="facts">
-      <dt>Size</dt><dd><span class="diff"><span class="add">+{{.PR.Additions}}</span> <span class="del">−{{.PR.Deletions}}</span></span> in {{.PR.ChangedFiles}} files</dd>
-      <dt>Author</dt><dd>{{.PR.Author}}{{if .PR.AuthorAssoc}} <span class="muted">{{.PR.AuthorAssoc}}</span>{{end}}</dd>
+      <dt>Author</dt><dd class="person">{{if .PR.Avatar}}<img class="avatar" src="{{.PR.Avatar}}" alt="" width="20" height="20">{{else}}<span class="avatar">{{initial .PR.Author}}</span>{{end}} {{.PR.Author}}{{if .PR.AuthorAssoc}} <span class="muted">{{.PR.AuthorAssoc}}</span>{{end}}</dd>
+      <dt>Size</dt><dd><span class="diff"><span class="add">+{{.PR.Additions}}</span> <span class="del">−{{.PR.Deletions}}</span><span class="split" style="--a: {{addShare .PR.Additions .PR.Deletions}}%"></span></span> in {{.PR.ChangedFiles}} files</dd>
       <dt>State</dt><dd>{{.PR.State}}{{if .PR.Draft}}, draft{{end}}</dd>
       {{if .PR.CI}}<dt>CI</dt><dd><span class="ci ci-{{.PR.CI}}"></span> {{.PR.CI}}</dd>{{end}}
       {{if .PR.ReviewState}}<dt>Reviews</dt><dd>{{.PR.ReviewState}}</dd>{{end}}
@@ -83,7 +93,7 @@
       <dt>Updated</dt><dd>{{ago .PR.UpdatedAt}}</dd>
       {{if .PR.Labels}}<dt>Labels</dt><dd class="marks">{{range .PR.Labels}}<span class="mark">{{.}}</span>{{end}}</dd>{{end}}
     </dl>
-    <h3>Agent runs</h3>
+    <h3 class="rail-title agent-title">Agent runs</h3>
     {{if .Runs}}
     <ul class="runs">
       {{range .Runs}}

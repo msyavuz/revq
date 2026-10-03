@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS runs (
   finished_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS runs_status ON runs(status);
+CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS drafts (
   id INTEGER PRIMARY KEY,
   pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
@@ -90,13 +91,11 @@ type Policy struct {
 
 type Config struct {
 	Policy           Policy  `json:"policy"`
-	TriageModel      string  `json:"triage_model"`
 	ReviewModel      string  `json:"review_model"`
 	PollSeconds      int     `json:"poll_seconds"`
 	StaleDays        int     `json:"stale_days"`
 	DailyBudgetUSD   float64 `json:"daily_budget_usd"`
 	RunBudgetUSD     float64 `json:"run_budget_usd"`
-	TriageDiffChars  int     `json:"triage_diff_chars"`
 	ReviewChunkChars int     `json:"review_chunk_chars"`
 	ReviewMaxChunks  int     `json:"review_max_chunks"`
 	ReviewBots       bool    `json:"review_bots"`
@@ -110,13 +109,11 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		TriageModel:      "haiku",
 		ReviewModel:      "sonnet",
 		PollSeconds:      120,
 		StaleDays:        30,
 		DailyBudgetUSD:   3,
 		RunBudgetUSD:     1,
-		TriageDiffChars:  24000,
 		ReviewChunkChars: 120000,
 		ReviewMaxChunks:  3,
 	}
@@ -134,17 +131,14 @@ type Repo struct {
 
 func (r Repo) Full() string { return r.Owner + "/" + r.Name }
 
-type Triage struct {
+// Assessment is the reviewer's short read of a PR at one commit: what the
+// board shows on a card before you open it.
+type Assessment struct {
 	Summary             string   `json:"summary"`
-	Category            string   `json:"category"`
 	Risk                string   `json:"risk"`
-	RiskReasons         []string `json:"risk_reasons"`
 	NeedsMaintainer     bool     `json:"needs_maintainer"`
 	MaintainerQuestions []string `json:"maintainer_questions"`
-	ReviewDepth         string   `json:"review_depth"`
-	FocusFiles          []string `json:"focus_files"`
 	SuggestedLabels     []string `json:"suggested_labels"`
-	SplitSuggestion     string   `json:"split_suggestion"`
 }
 
 type PR struct {
@@ -173,16 +167,17 @@ type PR struct {
 	Col          string
 	ColOverride  string
 	OverrideSHA  string
-	Triage       *Triage
-	TriageSHA    string
+	Assessment   *Assessment
+	AssessedSHA  string
 	PostedSHA    string
+	Avatar       string
 	Requested    int // 1 my review is requested, 0 it isn't, -1 not tracked (repo scope "all")
 }
 
 type Run struct {
 	ID           int64
 	PRID         int64
-	Kind         string // triage, review
+	Kind         string // review
 	HeadSHA      string
 	Status       string // queued, running, done, failed
 	Model        string
@@ -194,12 +189,21 @@ type Run struct {
 	FinishedAt   int64
 }
 
+// SnippetLine is one line of the diff shown next to a finding.
+type SnippetLine struct {
+	N      int    `json:"n"` // new-file line number, 0 for a removed line
+	Kind   string `json:"k"` // add, del, ctx
+	Text   string `json:"t"`
+	Target bool   `json:"target,omitempty"` // the line the finding is about
+}
+
 type Finding struct {
-	Path     string `json:"path"`
-	Line     int    `json:"line"`
-	Severity string `json:"severity"`
-	Body     string `json:"body"`
-	Inline   bool   `json:"inline"` // line exists on the right side of the diff
+	Path     string        `json:"path"`
+	Line     int           `json:"line"`
+	Severity string        `json:"severity"`
+	Body     string        `json:"body"`
+	Inline   bool          `json:"inline"`            // line exists on the right side of the diff
+	Snippet  []SnippetLine `json:"snippet,omitempty"` // the code around the line, for display only
 }
 
 type Draft struct {
@@ -210,7 +214,7 @@ type Draft struct {
 	Body      string
 	Findings  []Finding
 	Notes     string
-	Status    string // draft, posted, discarded
+	Status    string // draft, pending (handed to GitHub as a pending review), posted, discarded
 	CreatedAt int64
 	PostedAt  int64
 }
@@ -229,10 +233,16 @@ func Open(path string) (*Store, error) {
 	for _, m := range []string{
 		`ALTER TABLE repos ADD COLUMN scope TEXT NOT NULL DEFAULT 'requested'`,
 		`ALTER TABLE prs ADD COLUMN requested INTEGER NOT NULL DEFAULT -1`,
+		`ALTER TABLE prs ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return nil, err
 		}
+	}
+	// The separate triage step is gone; don't leave its queued runs stuck.
+	if _, err := db.Exec(`UPDATE runs SET status='failed', error='triage step was removed', finished_at=created_at
+		WHERE kind='triage' AND status IN ('queued','running')`); err != nil {
+		return nil, err
 	}
 	// Anything left running belongs to a previous process.
 	if _, err := db.Exec(`UPDATE runs SET status='queued' WHERE status='running'`); err != nil {
@@ -349,7 +359,7 @@ func (s *Store) PolicyFor(repoID int64) Policy {
 const prCols = `p.id, p.repo_id, r.owner||'/'||r.name, p.number, p.title, p.body, p.author,
 	p.author_assoc, p.is_bot, p.url, p.state, p.draft, p.head_sha, p.base_ref, p.additions,
 	p.deletions, p.changed_files, p.ci, p.review_state, p.labels, p.created_at, p.updated_at,
-	p.col, p.col_override, p.override_sha, p.triage, p.triage_sha, p.posted_sha, p.requested
+	p.col, p.col_override, p.override_sha, p.triage, p.triage_sha, p.posted_sha, p.requested, p.avatar
 	FROM prs p JOIN repos r ON r.id = p.repo_id `
 
 func scanPR(sc interface{ Scan(...any) error }) (PR, error) {
@@ -358,15 +368,15 @@ func scanPR(sc interface{ Scan(...any) error }) (PR, error) {
 	err := sc.Scan(&p.ID, &p.RepoID, &p.Repo, &p.Number, &p.Title, &p.Body, &p.Author,
 		&p.AuthorAssoc, &p.IsBot, &p.URL, &p.State, &p.Draft, &p.HeadSHA, &p.BaseRef, &p.Additions,
 		&p.Deletions, &p.ChangedFiles, &p.CI, &p.ReviewState, &labels, &p.CreatedAt, &p.UpdatedAt,
-		&p.Col, &p.ColOverride, &p.OverrideSHA, &triage, &p.TriageSHA, &p.PostedSHA, &p.Requested)
+		&p.Col, &p.ColOverride, &p.OverrideSHA, &triage, &p.AssessedSHA, &p.PostedSHA, &p.Requested, &p.Avatar)
 	if err != nil {
 		return p, err
 	}
 	_ = json.Unmarshal([]byte(labels), &p.Labels)
 	if triage != "" {
-		var t Triage
-		if json.Unmarshal([]byte(triage), &t) == nil {
-			p.Triage = &t
+		var a Assessment
+		if json.Unmarshal([]byte(triage), &a) == nil {
+			p.Assessment = &a
 		}
 	}
 	return p, nil
@@ -408,19 +418,19 @@ func (s *Store) UpsertPR(p PR) (int64, error) {
 	var id int64
 	err := s.db.QueryRow(`INSERT INTO prs(repo_id, number, title, body, author, author_assoc, is_bot,
 		url, state, draft, head_sha, base_ref, additions, deletions, changed_files, ci, review_state,
-		labels, created_at, updated_at, requested)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		labels, created_at, updated_at, requested, avatar)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(repo_id, number) DO UPDATE SET title=excluded.title, body=excluded.body,
 		author=excluded.author, author_assoc=excluded.author_assoc, is_bot=excluded.is_bot,
 		url=excluded.url, state=excluded.state, draft=excluded.draft, head_sha=excluded.head_sha,
 		base_ref=excluded.base_ref, additions=excluded.additions, deletions=excluded.deletions,
 		changed_files=excluded.changed_files, ci=excluded.ci, review_state=excluded.review_state,
 		labels=excluded.labels, created_at=excluded.created_at, updated_at=excluded.updated_at,
-		requested=excluded.requested
+		requested=excluded.requested, avatar=excluded.avatar
 		RETURNING id`,
 		p.RepoID, p.Number, p.Title, p.Body, p.Author, p.AuthorAssoc, p.IsBot, p.URL, p.State,
 		p.Draft, p.HeadSHA, p.BaseRef, p.Additions, p.Deletions, p.ChangedFiles, p.CI,
-		p.ReviewState, toJSON(nonNil(p.Labels)), p.CreatedAt, p.UpdatedAt, p.Requested).Scan(&id)
+		p.ReviewState, toJSON(nonNil(p.Labels)), p.CreatedAt, p.UpdatedAt, p.Requested, p.Avatar).Scan(&id)
 	return id, err
 }
 
@@ -446,8 +456,10 @@ func (s *Store) SetOverride(id int64, col, sha string) error {
 	return err
 }
 
-func (s *Store) SetTriage(id int64, t Triage, sha string) error {
-	_, err := s.db.Exec(`UPDATE prs SET triage=?, triage_sha=? WHERE id=?`, toJSON(t), sha, id)
+// SetAssessment stores the reviewer's read. The columns keep their old names
+// from when a separate triage step produced it.
+func (s *Store) SetAssessment(id int64, a Assessment, sha string) error {
+	_, err := s.db.Exec(`UPDATE prs SET triage=?, triage_sha=? WHERE id=?`, toJSON(a), sha, id)
 	return err
 }
 
@@ -480,11 +492,11 @@ func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	return r, err
 }
 
-// NextRun claims the next queued run: triage before review, freshest PR first.
+// NextRun claims the next queued run, freshest PR first.
 func (s *Store) NextRun() (Run, bool, error) {
 	r, err := scanRun(s.db.QueryRow(`SELECT ` + runCols + ` FROM runs WHERE id = (
 		SELECT q.id FROM runs q JOIN prs p ON p.id = q.pr_id WHERE q.status='queued'
-		ORDER BY (q.kind='triage') DESC, p.updated_at DESC LIMIT 1)`))
+		ORDER BY p.updated_at DESC LIMIT 1)`))
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, false, nil
 	}
@@ -527,8 +539,13 @@ func (s *Store) HasRun(prID int64, kind, sha string) bool {
 	return n > 0
 }
 
-// DiscardPendingDrafts drops unposted drafts for a PR.
-func (s *Store) DiscardPendingDrafts(prID int64) error {
+// SettleDrafts runs once the maintainer has answered on GitHub itself: a draft
+// that was handed over as a pending review counts as posted, one that never
+// left revq is moot.
+func (s *Store) SettleDrafts(prID int64) error {
+	if _, err := s.db.Exec(`UPDATE drafts SET status='posted', posted_at=? WHERE pr_id=? AND status='pending'`, now(), prID); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`UPDATE drafts SET status='discarded' WHERE pr_id=? AND status='draft'`, prID)
 	return err
 }
@@ -583,7 +600,7 @@ func scanDraft(sc interface{ Scan(...any) error }) (Draft, error) {
 
 // CreateDraft replaces any unposted draft for the PR.
 func (s *Store) CreateDraft(d Draft) (int64, error) {
-	if _, err := s.db.Exec(`UPDATE drafts SET status='discarded' WHERE pr_id=? AND status='draft'`, d.PRID); err != nil {
+	if _, err := s.db.Exec(`UPDATE drafts SET status='discarded' WHERE pr_id=? AND status IN ('draft','pending')`, d.PRID); err != nil {
 		return 0, err
 	}
 	if d.Findings == nil {
@@ -619,7 +636,7 @@ func (s *Store) SetDraftStatus(id int64, status string) error {
 
 // PendingDrafts maps PR id to the head SHA its unposted draft was written against.
 func (s *Store) PendingDrafts() (map[int64]string, error) {
-	rows, err := s.db.Query(`SELECT pr_id, head_sha FROM drafts WHERE status='draft'`)
+	rows, err := s.db.Query(`SELECT pr_id, head_sha FROM drafts WHERE status IN ('draft','pending')`)
 	if err != nil {
 		return nil, err
 	}

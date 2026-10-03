@@ -1,0 +1,24 @@
+{{define "login"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · revq</title>
+<script>try{var t=localStorage.getItem("revq-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-page">
+<main class="login">
+  <a class="brand" href="/login"><img src="/static/icon.svg" alt="" width="28" height="28">revq</a>
+  <h1>Sign in</h1>
+  {{if .Error}}<p class="login-error" role="alert">{{.Error}}</p>{{end}}
+  {{if .FirstRun}}<p class="muted">First time here? The account is <code>admin</code> with password <code>admin</code>. You'll set your own right after signing in.</p>{{end}}
+  <form method="post" action="/login">
+    <label>Username<input name="username" value="{{.Username}}" autocomplete="username" autocapitalize="none" required autofocus></label>
+    <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="primary">Sign in</button>
+  </form>
+</main>
+</body>
+</html>{{end}}
