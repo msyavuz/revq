@@ -1,0 +1,44 @@
+{{define "content"}}
+{{if .Data.NoRepos}}<p class="empty">No repositories yet. <a href="/settings">Add one in Settings</a> and your review requests show up here.</p>{{end}}
+<div id="board" class="board" hx-get="/board" hx-trigger="every 20s [!document.body.classList.contains('dragging')]" hx-swap="innerHTML">
+{{template "columns" .Data.Columns}}
+</div>
+{{end}}
+
+{{define "columns"}}
+{{range .}}{{$col := .Key}}
+<section class="col col-{{.Key}}" data-col="{{.Key}}" aria-label="{{.Title}}">
+  <h2 title="{{.Hint}}"><span class="lane-name">{{.Title}}</span> <span class="count">{{len .Cards}}</span></h2>
+  <div class="cards">
+  {{if not .Cards}}<p class="lane-empty">{{.Empty}}</p>{{end}}
+  {{range .Cards}}
+    <article class="card" draggable="true" data-id="{{.PR.ID}}">
+      <div class="size" title="{{.PR.ChangedFiles}} files changed">
+        <div class="track"><div class="weight" style="--w: {{weight .PR.Additions .PR.Deletions}}%; --a: {{addShare .PR.Additions .PR.Deletions}}%"></div></div>
+        <span class="diff"><span class="add">+{{.PR.Additions}}</span> <span class="del">−{{.PR.Deletions}}</span></span>
+      </div>
+      <div class="ref"><span class="repo">{{.PR.Repo}}#{{.PR.Number}}</span></div>
+      <a class="title" href="/pr/{{.PR.ID}}">{{.PR.Title}}</a>
+      {{with .PR.Triage}}<p class="sum">{{.Summary}}</p>{{end}}
+      {{if or .Risk .Decision .HasDraft .PR.Draft .Running .Pinned}}
+      <div class="marks">
+        {{if .Decision}}<span class="mark hl">decision needed</span>{{end}}
+        {{if .HasDraft}}<span class="mark agent">review drafted{{if .DraftStale}}, outdated{{end}}</span>{{end}}
+        {{if .Running}}<span class="mark agent">agent {{.Running}}</span>{{end}}
+        {{if .Risk}}<span class="mark risk-{{.Risk}}">{{.Risk}} risk</span>{{end}}
+        {{if .PR.Draft}}<span class="mark">draft PR</span>{{end}}
+        {{if .Pinned}}<span class="mark">pinned</span>{{end}}
+      </div>
+      {{end}}
+      <div class="foot">
+        {{if .PR.CI}}<span class="ci ci-{{.PR.CI}}" title="CI {{.PR.CI}}"></span>{{end}}
+        <span class="who">{{.PR.Author}}</span>
+        <span class="when">{{ago .PR.UpdatedAt}}</span>
+        {{if and (not .Running) (not .HasDraft) (ne $col "done")}}<button class="mini" hx-post="/pr/{{.PR.ID}}/run" hx-vals='{"kind":"full"}' hx-target="#board" hx-swap="innerHTML" title="The agent reads this PR and drafts a review. Nothing is posted.">Draft review</button>{{end}}
+      </div>
+    </article>
+  {{end}}
+  </div>
+</section>
+{{end}}
+{{end}}

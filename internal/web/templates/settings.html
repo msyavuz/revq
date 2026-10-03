@@ -1,0 +1,106 @@
+{{define "policy"}}
+<label class="check"><input type="checkbox" name="auto_review"{{if .AutoReview}} checked{{end}}> Auto review: draft a review for every PR waiting on me</label>
+<label class="check"><input type="checkbox" name="auto_post"{{if .AutoPost}} checked{{end}}> Auto post: publish drafted reviews without my approval (always as a comment, never approve or block)</label>
+<label class="check"><input type="checkbox" name="auto_label"{{if .AutoLabel}} checked{{end}}> Auto label: apply the labels the agent suggests</label>
+{{end}}
+
+{{define "tgtoken"}}
+<div id="tgtoken">
+  <label for="telegram_token">Telegram bot token{{if .TelegramToken}} (saved){{end}}</label>
+  <div class="row">
+    <input type="password" id="telegram_token" name="telegram_token" autocomplete="off" placeholder="{{if .TelegramToken}}Type a new token to replace it{{else}}Token from @BotFather{{end}}">
+    {{if .TelegramToken}}<button type="button" class="ghost danger" hx-post="/settings/telegram-token/remove" hx-target="#tgtoken" hx-swap="outerHTML" hx-confirm="Remove the saved Telegram token?">Remove</button>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "content"}}
+{{with .Data}}
+<div class="detail settings">
+  <section class="panel">
+    <h2>Repositories</h2>
+    <form method="post" action="/repos" class="row">
+      <input name="repo" placeholder="owner/name" required>
+      <select name="scope" aria-label="Which pull requests to track">
+        <option value="requested">Review requests for me</option>
+        <option value="all">All open PRs</option>
+      </select>
+      <button class="primary">Add</button>
+    </form>
+    {{range .Repos}}
+    <div class="repo-row">
+      <div><strong>{{.Full}}</strong> <span class="muted">synced {{ago .LastPolled}}</span>
+        {{if .LastError}}<div class="err">{{.LastError}}</div>{{end}}</div>
+      <form method="post" action="/repos/{{.ID}}/policy">
+        <label>Track
+          <select name="scope">
+            <option value="requested"{{if ne .Scope "all"}} selected{{end}}>PRs where my review is requested, plus ones I've reviewed</option>
+            <option value="all"{{if eq .Scope "all"}} selected{{end}}>All open PRs</option>
+          </select></label>
+        <label class="check"><input type="checkbox" name="override"{{if .Policy}} checked{{end}}> Override the default autonomy for this repo</label>
+        <div class="indent">{{if .Policy}}{{template "policy" .Policy}}{{else}}{{template "policy" $.Data.Config.Policy}}{{end}}</div>
+        <div class="actions">
+          <button>Save</button>
+          <button class="ghost danger" formaction="/repos/{{.ID}}/delete" onclick="return confirm('Remove {{.Full}} and its board history?')">Remove</button>
+        </div>
+      </form>
+    </div>
+    {{end}}
+  </section>
+
+  <form method="post" action="/settings">
+  {{with .Config}}
+  <section class="panel">
+    <h2>Default autonomy</h2>
+    <p class="muted">What the agent does on every sync without asking. With everything off, it only runs when you press "Draft review" on a card.</p>
+    {{template "policy" .Policy}}
+    <label class="check"><input type="checkbox" name="review_bots"{{if .ReviewBots}} checked{{end}}> Auto review PRs opened by bots</label>
+    <label class="check"><input type="checkbox" name="review_drafts"{{if .ReviewDrafts}} checked{{end}}> Auto review draft PRs</label>
+  </section>
+
+  <section class="panel">
+    <h2>Token budget</h2>
+    <div class="grid">
+      <label>Daily budget (USD, 0 = unlimited)<input name="daily_budget_usd" value="{{.DailyBudgetUSD}}"></label>
+      <label>Max per agent call (USD)<input name="run_budget_usd" value="{{.RunBudgetUSD}}"></label>
+      <label>Triage model<input name="triage_model" value="{{.TriageModel}}"></label>
+      <label>Review model<input name="review_model" value="{{.ReviewModel}}"></label>
+      <label>Triage diff excerpt (chars)<input name="triage_diff_chars" value="{{.TriageDiffChars}}"></label>
+      <label>Review chunk size (chars)<input name="review_chunk_chars" value="{{.ReviewChunkChars}}"></label>
+      <label>Max review chunks per PR<input name="review_max_chunks" value="{{.ReviewMaxChunks}}"></label>
+    </div>
+    <label>Extra paths to keep out of the model (one glob per line; lockfiles, vendored and generated files are already skipped)
+      <textarea name="ignore_globs" rows="3" placeholder="docs/static/&#10;*.generated.ts">{{.IgnoreGlobs}}</textarea></label>
+  </section>
+
+  <section class="panel">
+    <h2>Review guidelines</h2>
+    <label>Project conventions the reviewer should apply. Keep it short, it is sent with every review.
+      <textarea name="guidelines" rows="5">{{.Guidelines}}</textarea></label>
+  </section>
+
+  <section class="panel">
+    <h2>Sync and notifications</h2>
+    <div class="grid">
+      <label>Poll interval (seconds)<input name="poll_seconds" value="{{.PollSeconds}}"></label>
+      <label>Ignore PRs idle for more than (days)<input name="stale_days" value="{{.StaleDays}}"></label>
+    </div>
+    <p class="muted">A message goes out whenever a PR lands in "Needs you". Fill in either or both.</p>
+    <label>Slack-compatible incoming webhook URL
+      <input name="webhook_url" value="{{.WebhookURL}}" placeholder="https://hooks.slack.com/services/..."></label>
+    <div class="grid">
+      {{template "tgtoken" .}}
+      <label>Telegram chat ID
+        <input name="telegram_chat_id" value="{{.TelegramChatID}}" placeholder="e.g. 123456789"></label>
+    </div>
+    <div class="actions">
+      <button class="primary">Save settings</button>
+      <button type="button" class="ghost" hx-post="/settings/test-notify" hx-target="#notify-result" hx-swap="innerHTML">Send test notification</button>
+      <span id="notify-result" class="muted" role="status"></span>
+    </div>
+  </section>
+  {{end}}
+  </form>
+</div>
+{{end}}
+{{end}}

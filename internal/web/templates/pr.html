@@ -1,0 +1,102 @@
+{{define "content"}}
+{{with .Data}}
+<div class="pr">
+  <header class="pr-head">
+    <div class="ref"><span class="repo">{{.PR.Repo}}#{{.PR.Number}}</span></div>
+    <h1>{{.PR.Title}}</h1>
+    <div class="actions">
+      <a class="btn" href="{{.PR.URL}}" target="_blank" rel="noopener">Open on GitHub</a>
+      <form method="post" action="/pr/{{.PR.ID}}/run"><input type="hidden" name="kind" value="review"><button class="agent">Draft review</button></form>
+      <form method="post" action="/pr/{{.PR.ID}}/run"><input type="hidden" name="kind" value="triage"><button class="agent">Triage only</button></form>
+      {{if .Pinned}}<form method="post" action="/pr/{{.PR.ID}}/move"><input type="hidden" name="col" value="auto"><button class="ghost">Unpin from column</button></form>{{end}}
+    </div>
+  </header>
+
+  <div class="pr-main">
+    <section class="panel">
+      <h2>Triage{{if .TriageStale}} <span class="mark">from {{short .PR.TriageSHA}}, new commits since</span>{{end}}</h2>
+      {{with .PR.Triage}}
+        <p class="lede">{{.Summary}}</p>
+        <div class="marks">
+          <span class="mark risk-{{.Risk}}">{{.Risk}} risk</span>
+          <span class="mark">{{.Category}}</span>
+          <span class="mark">suggested review: {{.ReviewDepth}}</span>
+        </div>
+        {{if .MaintainerQuestions}}<h3><span class="hl">Needs your call</span></h3><ul class="ask">{{range .MaintainerQuestions}}<li>{{.}}</li>{{end}}</ul>{{end}}
+        {{if .RiskReasons}}<h3>Why this risk</h3><ul>{{range .RiskReasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+        {{if .SplitSuggestion}}<h3>Split suggestion</h3><p>{{.SplitSuggestion}}</p>{{end}}
+        {{if .FocusFiles}}<h3>Where to look</h3><ul class="files">{{range .FocusFiles}}<li>{{.}}</li>{{end}}</ul>{{end}}
+        {{if .SuggestedLabels}}<h3>Suggested labels</h3><div class="marks">{{range .SuggestedLabels}}<span class="mark">{{.}}</span>{{end}}</div>{{end}}
+      {{else}}
+        <p class="muted">Not triaged yet. "Draft review" runs triage first.</p>
+      {{end}}
+    </section>
+
+    {{with .Draft}}
+    <section class="panel">
+      <h2>Review {{if eq .Status "posted"}}<span class="mark">posted {{ago .PostedAt}}</span>{{else}}<span class="mark agent">drafted by the agent, not posted</span>{{end}}
+        {{if $.Data.DraftStale}}<span class="mark risk-medium">written for {{short .HeadSHA}}, new commits since</span>{{end}}</h2>
+      {{if .Notes}}<p class="note">{{.Notes}}</p>{{end}}
+      {{if eq .Status "draft"}}
+      <form method="post" action="/draft/{{.ID}}/post" class="review">
+        <label>Summary comment<textarea name="body" rows="14">{{.Body}}</textarea></label>
+        {{if .Findings}}<h3>Findings <span class="muted">untick to drop, edit freely</span></h3>{{end}}
+        {{range $i, $f := .Findings}}
+        <div class="finding">
+          <label class="pick"><input type="checkbox" name="f{{$i}}" checked>
+            <code>{{$f.Path}}:{{$f.Line}}</code> <span class="mark sev-{{$f.Severity}}">{{$f.Severity}}</span>
+            {{if not $f.Inline}}<span class="mark" title="This line is not in the diff, so the finding goes into the summary comment">not inline</span>{{end}}</label>
+          <textarea name="fb{{$i}}" rows="3">{{$f.Body}}</textarea>
+        </div>
+        {{end}}
+        <div class="actions">
+          <select name="verdict" aria-label="Review type">
+            <option value="COMMENT"{{if eq .Verdict "COMMENT"}} selected{{end}}>Comment</option>
+            <option value="REQUEST_CHANGES"{{if eq .Verdict "REQUEST_CHANGES"}} selected{{end}}>Request changes</option>
+            <option value="APPROVE"{{if eq .Verdict "APPROVE"}} selected{{end}}>Approve</option>
+          </select>
+          <button class="primary">Post review to GitHub</button>
+          <button class="ghost" formaction="/draft/{{.ID}}/discard">Discard draft</button>
+        </div>
+      </form>
+      {{else}}
+        <pre class="body">{{.Body}}</pre>
+        {{range .Findings}}<div class="finding"><code>{{.Path}}:{{.Line}}</code> <span class="mark sev-{{.Severity}}">{{.Severity}}</span><p>{{.Body}}</p></div>{{end}}
+      {{end}}
+    </section>
+    {{end}}
+
+    {{if .PR.Body}}
+    <section class="panel"><h2>Description</h2><pre class="body">{{.PR.Body}}</pre></section>
+    {{end}}
+  </div>
+
+  <aside class="pr-rail">
+    <div class="weight" style="--w: {{weight .PR.Additions .PR.Deletions}}%; --a: {{addShare .PR.Additions .PR.Deletions}}%"></div>
+    <dl class="facts">
+      <dt>Size</dt><dd><span class="diff"><span class="add">+{{.PR.Additions}}</span> <span class="del">−{{.PR.Deletions}}</span></span> in {{.PR.ChangedFiles}} files</dd>
+      <dt>Author</dt><dd>{{.PR.Author}}{{if .PR.AuthorAssoc}} <span class="muted">{{.PR.AuthorAssoc}}</span>{{end}}</dd>
+      <dt>State</dt><dd>{{.PR.State}}{{if .PR.Draft}}, draft{{end}}</dd>
+      {{if .PR.CI}}<dt>CI</dt><dd><span class="ci ci-{{.PR.CI}}"></span> {{.PR.CI}}</dd>{{end}}
+      {{if .PR.ReviewState}}<dt>Reviews</dt><dd>{{.PR.ReviewState}}</dd>{{end}}
+      <dt>Head</dt><dd><code>{{short .PR.HeadSHA}}</code></dd>
+      <dt>Updated</dt><dd>{{ago .PR.UpdatedAt}}</dd>
+      {{if .PR.Labels}}<dt>Labels</dt><dd class="marks">{{range .PR.Labels}}<span class="mark">{{.}}</span>{{end}}</dd>{{end}}
+    </dl>
+    <h3>Agent runs</h3>
+    {{if .Runs}}
+    <ul class="runs">
+      {{range .Runs}}
+      <li>
+        <span class="run-kind">{{.Kind}}{{if ne .Status "done"}} <span class="mark{{if eq .Status "failed"}} sev-blocker{{else}} agent{{end}}">{{.Status}}</span>{{end}}</span>
+        <span class="run-cost">{{cents .CostUSD}}</span>
+        <span class="run-meta">{{.Model}}, {{.InputTokens}} in, {{.OutputTokens}} out, {{ago .CreatedAt}}</span>
+        {{if .Error}}<span class="err">{{.Error}}</span>{{end}}
+      </li>
+      {{end}}
+    </ul>
+    {{else}}<p class="muted">The agent hasn't looked at this PR.</p>{{end}}
+  </aside>
+</div>
+{{end}}
+{{end}}
