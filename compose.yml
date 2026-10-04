@@ -1,6 +1,9 @@
 services:
   revq:
-    build: .
+    # Pin a version (for example :v0.1.0) to control when you update.
+    image: ghcr.io/msyavuz/revq:latest
+    # To build from this checkout instead, comment out `image` and use:
+    # build: .
     restart: unless-stopped
     ports:
       - "8080:8080"
