@@ -87,6 +87,20 @@ func build() error {
 	if err := os.WriteFile(filepath.Join(outDir, "site.css"), siteCSS, 0o644); err != nil {
 		return err
 	}
+	// The guide refers to its images as screenshots/<name>, which also
+	// resolves when the Markdown is read on GitHub.
+	shots, err := filepath.Glob("docs/screenshots/*.png")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(outDir, "screenshots"), 0o755); err != nil {
+		return err
+	}
+	for _, f := range shots {
+		if err := copyFile(f, filepath.Join(outDir, "screenshots", filepath.Base(f))); err != nil {
+			return err
+		}
+	}
 
 	out, err := os.Create(filepath.Join(outDir, "index.html"))
 	if err != nil {

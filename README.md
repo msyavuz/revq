@@ -6,6 +6,8 @@ A self-hosted review queue for maintainers. revq watches the pull requests waiti
 your review, has Claude Code draft a review for each, and shows what needs you on a
 kanban board. Nothing is posted to GitHub until you approve it, unless you turn that on.
 
+![The revq board](docs/screenshots/board.png)
+
 Full setup, deployment and usage: the [revq guide](https://revq.dev)
 (source in [docs/guide.md](docs/guide.md)).
 
@@ -14,11 +16,14 @@ Full setup, deployment and usage: the [revq guide](https://revq.dev)
 On a home server with Docker:
 
     cp .env.example .env       # fill in the tokens, see below
-    docker compose up -d --build
+    docker compose up -d       # pulls ghcr.io/msyavuz/revq
 
 Open `http://<server>:8080` and sign in as `admin` / `admin`. You're asked to set a new
 password before anything else works. Then go to Settings and add a repository. Data is one SQLite
-file in the `revq-data` volume. To update: `git pull && docker compose up -d --build`.
+file in the `revq-data` volume. To update: `docker compose pull && docker compose up -d`.
+
+Releases are version tags (`v0.1.0`, ...). Pushing one publishes the image for that
+version and moves `latest`.
 
 Locally, using your existing `gh` and `claude` logins:
 

@@ -69,3 +69,6 @@ a { color: var(--pencil); text-underline-offset: 2px; }
   .doc { padding: 28px 16px 80px; }
   .doc h1 { font-size: 2rem; }
 }
+
+.doc img { display: block; max-width: 100%; height: auto; margin: 18px 0; border: 1px solid var(--rule); border-radius: 8px; }
+.doc p:has(> img) { max-width: none; }

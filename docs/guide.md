@@ -4,6 +4,8 @@ revq is a review queue for one maintainer. It watches the pull requests waiting 
 review, has Claude Code draft inline comments for them, and lets you approve, edit or drop
 those comments before anything reaches GitHub.
 
+![The revq board: five lanes from Inbox to Done, with a card for each pull request](screenshots/board.png)
+
 ## Set it up
 
 revq needs two credentials. Both go in a `.env` file next to `compose.yml`.
@@ -36,9 +38,23 @@ Give it one of these:
     git clone https://github.com/msyavuz/revq
     cd revq
     cp .env.example .env        # then fill in the two credentials
-    docker compose up -d --build
+    docker compose up -d
 
-revq now listens on port 8080 of the server. Open `http://<server>:8080`.
+This pulls the published image `ghcr.io/msyavuz/revq` and starts it. revq now listens
+on port 8080 of the server. Open `http://<server>:8080`.
+
+Images are built for Intel/AMD and ARM servers. `compose.yml` uses the `latest` tag;
+change it to a version such as `ghcr.io/msyavuz/revq:v0.1.0` if you'd rather choose when
+to update.
+
+While the image is private, the server has to sign in to the registry once before it
+can pull. Create a GitHub token with the `read:packages` scope, then:
+
+    echo <token> | docker login ghcr.io -u <your GitHub username> --password-stdin
+
+To build from the source checkout instead of pulling, switch the `image` line in
+`compose.yml` for `build: .` as its comment describes, and run
+`docker compose up -d --build`.
 
 Everything revq stores (settings, the board, drafts, your account) is one SQLite file in
 the `revq-data` Docker volume.
@@ -117,6 +133,8 @@ commits, and you can remove it from the PR's page.
 A PR's page shows the author's description first, then revq's draft in a blue block. The
 blue block is always the agent's writing. Nothing in it is on GitHub until you send it.
 
+![A pull request in revq: the author's description, then the agent's draft with each inline comment shown under the code it refers to](screenshots/review.png)
+
 A draft is a list of inline comments. Each one shows the code it is about, with the
 commented line's number highlighted, a severity (blocker, major, minor), and the comment
 text.
@@ -188,8 +206,14 @@ Settings, then press "Send test notification".
 
 **Update:**
 
-    git pull
-    docker compose up -d --build
+    docker compose pull
+    docker compose up -d
+
+The running version is shown at the bottom of every page, and by
+`docker compose run --rm revq version`. To go back to an earlier version, set that
+version's tag on the `image` line in `compose.yml` and run `docker compose up -d`.
+Your data upgrades itself when a newer version starts; going back to an older one
+after that is not guaranteed to work, so take a backup first.
 
 **Back up:** stop revq so the file is complete, copy it out of the volume, and start again.
 
