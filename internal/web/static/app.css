@@ -124,7 +124,7 @@ textarea { font-family: var(--mono); font-size: 0.8125rem; line-height: 1.6; res
 /* board: five ruled lanes on the page, slips of paper in each */
 .board {
   display: grid; grid-template-columns: repeat(5, minmax(264px, 1fr));
-  padding: 0 10px; overflow-x: auto; align-items: stretch; min-height: calc(100dvh - 57px);
+  padding: 0 10px; overflow-x: auto; align-items: stretch; min-height: calc(100dvh - 57px - 64px);
 }
 .col { padding: 22px 14px 40px; border-left: 1px solid var(--rule); }
 .col:first-child { border-left: 0; }
@@ -364,3 +364,6 @@ button.mini:hover { background: var(--pencil-wash); }
 .login label input { margin-top: 6px; padding: 9px 12px; font-weight: 400; }
 .login button { width: 100%; padding: 10px 12px; margin-top: 8px; }
 .login-error { background: var(--del-wash); color: var(--del); padding: 9px 12px; border-radius: 4px; font-weight: 550; }
+
+.foot-bar { display: flex; gap: 14px; justify-content: center; padding: 18px 24px 28px; color: var(--ink-2); font-size: 0.8125rem; }
+.foot-bar a { color: var(--ink-2); }

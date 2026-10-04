@@ -39,6 +39,9 @@ func githubToken() string {
 	return strings.TrimSpace(string(out))
 }
 
+// version is set at build time with -ldflags "-X main.version=v1.2.3".
+var version = "dev"
+
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if err := run(log); err != nil {
@@ -66,8 +69,11 @@ func run(log *slog.Logger) error {
 		switch os.Args[1] {
 		case "reset-password":
 			return resetPassword()
+		case "version", "--version", "-v":
+			fmt.Println("revq", version)
+			return nil
 		default:
-			return fmt.Errorf("unknown command %q (the only command is reset-password)", os.Args[1])
+			return fmt.Errorf("unknown command %q (commands: version, reset-password)", os.Args[1])
 		}
 	}
 	token := githubToken()
@@ -98,7 +104,7 @@ func run(log *slog.Logger) error {
 	addr := env("REVQ_ADDR", "127.0.0.1:8080")
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           web.New(st, eng, log),
+		Handler:           web.New(st, eng, log, version),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -107,7 +113,7 @@ func run(log *slog.Logger) error {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	log.Info("listening", "addr", addr)
+	log.Info("listening", "addr", addr, "version", version)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

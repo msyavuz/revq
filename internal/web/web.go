@@ -26,15 +26,16 @@ import (
 var assets embed.FS
 
 type Server struct {
-	st     *store.Store
-	eng    *pipeline.Engine
-	log    *slog.Logger
-	logins *limiter
-	tpl    map[string]*template.Template
+	st      *store.Store
+	eng     *pipeline.Engine
+	log     *slog.Logger
+	logins  *limiter
+	version string
+	tpl     map[string]*template.Template
 }
 
-func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger) http.Handler {
-	s := &Server{st: st, eng: eng, log: log, logins: &limiter{fails: map[string][]time.Time{}}, tpl: map[string]*template.Template{}}
+func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger, version string) http.Handler {
+	s := &Server{st: st, eng: eng, log: log, version: version, logins: &limiter{fails: map[string][]time.Time{}}, tpl: map[string]*template.Template{}}
 	funcs := template.FuncMap{
 		"ago":      ago,
 		"initial":  initial,
@@ -106,6 +107,7 @@ type page struct {
 	Budget     float64
 	Queued     int
 	OverBudget bool
+	Version    string
 	Data       any
 }
 
@@ -113,7 +115,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name, title stri
 	now := time.Now()
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	p := page{
-		Title: title, Flash: r.URL.Query().Get("msg"), Data: data,
+		Title: title, Flash: r.URL.Query().Get("msg"), Data: data, Version: s.version,
 		Spend: s.st.SpendSince(midnight), Budget: s.st.Config().DailyBudgetUSD,
 		Queued: s.st.QueuedCount(), OverBudget: s.eng.OverBudget(),
 	}
