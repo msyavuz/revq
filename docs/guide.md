@@ -47,11 +47,6 @@ Images are built for Intel/AMD and ARM servers. `compose.yml` uses the `latest` 
 change it to a version such as `ghcr.io/msyavuz/revq:v0.1.0` if you'd rather choose when
 to update.
 
-While the image is private, the server has to sign in to the registry once before it
-can pull. Create a GitHub token with the `read:packages` scope, then:
-
-    echo <token> | docker login ghcr.io -u <your GitHub username> --password-stdin
-
 To build from the source checkout instead of pulling, switch the `image` line in
 `compose.yml` for `build: .` as its comment describes, and run
 `docker compose up -d --build`.
