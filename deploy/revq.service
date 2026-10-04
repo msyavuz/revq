@@ -1,0 +1,24 @@
+[Unit]
+Description=revq review queue
+Documentation=https://revq.dev
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=revq
+Group=revq
+# Tokens and settings: GITHUB_TOKEN, CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY,
+# REVQ_ADDR, REVQ_CLAUDE_BIN. See https://revq.dev
+EnvironmentFile=/etc/revq/revq.env
+Environment=REVQ_DB=/var/lib/revq/revq.db
+Environment=HOME=/var/lib/revq
+StateDirectory=revq
+WorkingDirectory=/var/lib/revq
+ExecStart=/usr/local/bin/revq
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

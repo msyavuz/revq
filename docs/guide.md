@@ -59,16 +59,56 @@ If you put revq behind a reverse proxy with HTTPS, have the proxy send the
 
 ## Run without Docker
 
-You need Go 1.25 or newer and the `claude` command on your `PATH`.
+revq is a single program. Each [release](https://github.com/msyavuz/revq/releases) has it
+ready-built for Linux and macOS, on Intel/AMD (`amd64`) and ARM (`arm64`).
 
-    go build -o revq ./cmd/revq
-    ./revq
+It needs the Claude Code command-line tool on the same machine. Install that first, as
+the user revq will run as:
+
+    curl -fsSL https://claude.ai/install.sh | bash
+
+Then download revq and start it:
+
+    curl -fsSLO https://github.com/msyavuz/revq/releases/download/v0.1.1/revq_v0.1.1_linux_amd64.tar.gz
+    tar -xzf revq_v0.1.1_linux_amd64.tar.gz
+    cd revq_v0.1.1_linux_amd64
+    GITHUB_TOKEN=<your token> ./revq
 
 Without `GITHUB_TOKEN` set, revq uses the token from a signed-in `gh`. Without a Claude
 token set, it uses your existing `claude` sign-in.
 
 By default this listens on `127.0.0.1:8080`, reachable only from the same machine. To
 reach it from other devices, set `REVQ_ADDR=:8080`.
+
+### As a service on a Linux server
+
+The download includes `revq.service`, a systemd unit that runs revq as its own user and
+keeps its data in `/var/lib/revq`.
+
+    sudo useradd --system --home-dir /var/lib/revq --create-home --shell /usr/sbin/nologin revq
+    sudo install -m 755 revq /usr/local/bin/revq
+    sudo install -m 644 revq.service /etc/systemd/system/revq.service
+    sudo install -d -m 750 -o root -g revq /etc/revq
+
+Put the settings in `/etc/revq/revq.env`, readable only by root and the `revq` group:
+
+    GITHUB_TOKEN=<your token>
+    CLAUDE_CODE_OAUTH_TOKEN=<token from claude setup-token>
+    REVQ_ADDR=:8080
+    REVQ_CLAUDE_BIN=/var/lib/revq/.local/bin/claude
+
+`REVQ_CLAUDE_BIN` is where the Claude Code installer puts the tool when run as the
+`revq` user:
+
+    sudo -u revq env HOME=/var/lib/revq bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+
+Then start it:
+
+    sudo systemctl enable --now revq
+
+To update, replace `/usr/local/bin/revq` with the binary from a newer release and run
+`sudo systemctl restart revq`. To build from source instead you need Go 1.25 or newer:
+`go build -o revq ./cmd/revq`.
 
 | Variable | Default | What it does |
 |---|---|---|

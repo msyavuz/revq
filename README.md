@@ -22,8 +22,8 @@ Open `http://<server>:8080` and sign in as `admin` / `admin`. You're asked to se
 password before anything else works. Then go to Settings and add a repository. Data is one SQLite
 file in the `revq-data` volume. To update: `docker compose pull && docker compose up -d`.
 
-Releases are version tags (`v0.1.0`, ...). Pushing one publishes the image for that
-version and moves `latest`.
+Releases are version tags (`v0.1.0`, ...). Each one publishes the Docker image and
+standalone binaries for Linux and macOS, for running without Docker.
 
 Locally, using your existing `gh` and `claude` logins:
 
