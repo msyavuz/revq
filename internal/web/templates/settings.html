@@ -37,10 +37,12 @@
             <option value="requested"{{if ne .Scope "all"}} selected{{end}}>PRs where my review is requested, plus ones I've reviewed</option>
             <option value="all"{{if eq .Scope "all"}} selected{{end}}>All open PRs</option>
           </select></label>
-        <label class="check"><input type="checkbox" name="override"{{if .Policy}} checked{{end}}> Override the default autonomy for this repo</label>
-        <div class="indent">{{if .Policy}}{{template "policy" .Policy}}{{else}}{{template "policy" $.Data.Config.Policy}}{{end}}</div>
+        <p class="repo-auto">Automation in this repository
+          {{if .Policy}}<span class="mark agent">differs from the defaults</span>{{else}}<span class="mark">same as the defaults</span>{{end}}</p>
+        {{if .Policy}}{{template "policy" .Policy}}{{else}}{{template "policy" $.Data.Config.Policy}}{{end}}
         <div class="actions">
           <button>Save</button>
+          {{if .Policy}}<button class="ghost" name="reset" value="1" title="Drop this repository's own automation settings and follow Default autonomy below">Use the defaults</button>{{end}}
           <button class="ghost danger" formaction="/repos/{{.ID}}/delete" onclick="return confirm('Remove {{.Full}} and its board history?')">Remove</button>
         </div>
       </form>

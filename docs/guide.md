@@ -207,7 +207,10 @@ many files the agent read.
 ## Automation
 
 Everything is off by default, so the agent only runs when you press "Draft review". The
-switches are in Settings, with an override per repository.
+switches are in Settings under "Default autonomy". Each repository's row has the same
+three switches: tick what you want for that repository and save. A repository whose
+switches match the defaults keeps following them; "Use the defaults" removes a
+repository's own settings.
 
 - **Auto review** drafts a review for every PR waiting on you, once per commit. It does
   not redraft while a draft is still waiting for you.
