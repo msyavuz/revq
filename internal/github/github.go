@@ -48,6 +48,8 @@ type PR struct {
 	ReviewDecision string
 	Labels         []string
 	CI             string
+	// UnresolvedThreads counts open review threads, out of the first 100.
+	UnresolvedThreads int
 }
 
 type File struct {
@@ -120,7 +122,8 @@ const prFields = `number title body url isDraft createdAt updatedAt
         authorAssociation author{login avatarUrl(size:64) __typename}
         reviewDecision
         labels(first:20){nodes{name}}
-        commits(last:1){nodes{commit{statusCheckRollup{state}}}}`
+        commits(last:1){nodes{commit{statusCheckRollup{state}}}}
+        reviewThreads(first:100){nodes{isResolved}}`
 
 const openPRsQuery = `query($owner:String!,$name:String!,$cursor:String){
   repository(owner:$owner,name:$name){
@@ -157,6 +160,7 @@ type prNode struct {
 	}
 	ReviewDecision string
 	Labels         struct{ Nodes []struct{ Name string } }
+	ReviewThreads  struct{ Nodes []struct{ IsResolved bool } }
 	Commits        struct {
 		Nodes []struct {
 			Commit struct {
@@ -180,6 +184,11 @@ func (n prNode) pr() PR {
 	}
 	for _, l := range n.Labels.Nodes {
 		p.Labels = append(p.Labels, l.Name)
+	}
+	for _, t := range n.ReviewThreads.Nodes {
+		if !t.IsResolved {
+			p.UnresolvedThreads++
+		}
 	}
 	if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
 		switch n.Commits.Nodes[0].Commit.StatusCheckRollup.State {

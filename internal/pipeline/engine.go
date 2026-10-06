@@ -128,7 +128,7 @@ func (e *Engine) syncRepo(ctx context.Context, r store.Repo) error {
 			HeadSHA: g.HeadSHA, BaseRef: g.BaseRef, Additions: g.Additions, Deletions: g.Deletions,
 			ChangedFiles: g.ChangedFiles, CI: g.CI, ReviewState: g.ReviewDecision, Labels: g.Labels,
 			CreatedAt: g.CreatedAt.Unix(), UpdatedAt: g.UpdatedAt.Unix(), Requested: requested[g.Number],
-			Avatar: g.Avatar,
+			Avatar: g.Avatar, Unresolved: g.UnresolvedThreads,
 		})
 		if err != nil {
 			return err
@@ -442,6 +442,13 @@ func (e *Engine) wantsAutoReview(pr store.PR, policy store.Policy, cfg store.Con
 	return d.Status == "posted" && d.HeadSHA != pr.HeadSHA
 }
 
+// looksReady reports whether a review amounts to "nothing stands in the way of
+// merging, as far as the diff shows": an approving verdict, no findings, and
+// no part of the change left unread.
+func looksReady(verdict string, findings, skipped int) bool {
+	return verdict == "APPROVE" && findings == 0 && skipped == 0
+}
+
 var verdictRank = map[string]int{"APPROVE": 0, "COMMENT": 1, "REQUEST_CHANGES": 2}
 
 var riskRank = map[string]int{"low": 0, "medium": 1, "high": 2}
@@ -479,6 +486,7 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 			Findings            []store.Finding `json:"findings"`
 			MaintainerQuestions []string        `json:"maintainer_questions"`
 			SuggestedLabels     []string        `json:"suggested_labels"`
+			ReadyOverview       []string        `json:"ready_overview"`
 		}
 		err := e.call(ctx, run, agent.Request{
 			System:    reviewSystem,
@@ -499,6 +507,7 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 		}
 		read.MaintainerQuestions = append(read.MaintainerQuestions, out.MaintainerQuestions...)
 		read.SuggestedLabels = append(read.SuggestedLabels, out.SuggestedLabels...)
+		read.ReadyOverview = append(read.ReadyOverview, out.ReadyOverview...)
 		for _, f := range out.Findings {
 			f.Inline = plan.Valid[f.Path][f.Line]
 			f.Snippet = snippet(plan.Patch[f.Path], f.Line, 4, 1)
@@ -516,6 +525,12 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 			len(plan.Valid), len(plan.Valid)+n, n)
 	}
 
+	// The overview is only a merge brief when the whole change was read and
+	// nothing was found; anything less and it would overstate what was checked.
+	read.Ready = looksReady(draft.Verdict, len(draft.Findings), len(plan.Skipped))
+	if !read.Ready {
+		read.ReadyOverview = nil
+	}
 	read.Summary = summaries[0]
 	read.NeedsMaintainer = len(read.MaintainerQuestions) > 0
 	if err := e.St.SetAssessment(pr.ID, read, pr.HeadSHA); err != nil {

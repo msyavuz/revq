@@ -42,6 +42,18 @@
         {{if $.Data.DraftStale}}<span class="mark risk-medium">written for {{short .HeadSHA}}, new commits since</span>{{end}}
       </div>
       {{if .Notes}}<p class="note">{{.Notes}}</p>{{end}}
+      {{if $.Data.Ready}}
+      <div class="ready">
+        <h3>Looks ready to merge</h3>
+        <p class="ready-note">The agent read the whole diff at <code>{{short $.Data.PR.HeadSHA}}</code> and found nothing to raise. That's a statement about the diff: it didn't run the code or see anything outside the changed lines. This overview is for you and is not posted.</p>
+        {{with $.Data.PR.Assessment}}{{if .ReadyOverview}}<ul>{{range .ReadyOverview}}<li>{{.}}</li>{{end}}</ul>{{end}}{{end}}
+        <dl class="ready-facts">
+          <dt>CI</dt><dd>{{if $.Data.PR.CI}}<span class="ci ci-{{$.Data.PR.CI}}"></span> {{$.Data.PR.CI}}{{else}}no checks reported{{end}}</dd>
+          <dt>Open review threads</dt><dd>{{if $.Data.PR.Unresolved}}{{$.Data.PR.Unresolved}} unresolved on GitHub{{else}}none{{end}}</dd>
+          <dt>Reviews on GitHub</dt><dd>{{if $.Data.PR.ReviewState}}{{$.Data.PR.ReviewState}}{{else}}none required{{end}}</dd>
+        </dl>
+      </div>
+      {{end}}
       {{with $.Data.PR.Assessment}}{{if .MaintainerQuestions}}
       <h3><span class="hl">Decide before you post</span></h3>
       <p class="decide-help">The agent can't settle these; they're judgement calls for you as maintainer. They are not part of the review. Decide, then say so in the overall comment, or pass a question on to the author.</p>
@@ -58,7 +70,7 @@
 
       {{if eq .Status "draft"}}
       <form method="post" action="/draft/{{.ID}}/post" class="review">
-        {{if .Findings}}<h3>Inline comments <span class="muted">untick to drop, edit freely</span></h3>{{else}}<p class="muted">The agent found nothing to comment on.</p>{{end}}
+        {{if .Findings}}<h3>Inline comments <span class="muted">untick to drop, edit freely</span></h3>{{else if not $.Data.Ready}}<p class="muted">The agent found nothing to comment on.</p>{{end}}
         {{range $i, $f := .Findings}}
         <div class="finding">
           <label class="pick"><input type="checkbox" name="f{{$i}}" checked>
