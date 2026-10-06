@@ -334,7 +334,6 @@ button.mini:hover { background: var(--pencil-wash); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 18px; }
 .repo-row { border-top: 1px solid var(--rule); margin-top: 18px; padding-top: 16px; }
 .repo-row strong { font-size: 1.0625rem; }
-.indent { margin-left: 24px; }
 @media (min-width: 860px) {
   .settings .panel { display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 48px; }
   .settings .panel > * { grid-column: 2; }
@@ -386,3 +385,4 @@ button.switch[aria-checked="true"] .knob::after { transform: translateX(13px); }
 @media (prefers-reduced-motion: reduce) { button.switch .knob, button.switch .knob::after { transition: none; } }
 .person .trust { display: flex; align-items: center; gap: 6px; flex-basis: 100%; margin-top: 2px; }
 .person .trust button.mini { border-color: var(--pencil); padding: 1px 8px; }
+.repo-auto { display: flex; align-items: center; gap: 8px; margin: 16px 0 4px; color: var(--ink-2); font-size: 0.875rem; font-weight: 550; }

@@ -673,16 +673,20 @@ func (s *Server) repoPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.eng.PollNow()
+	// Whatever is ticked is what gets saved. A repository only keeps settings
+	// of its own when they differ from the defaults, so one that matches keeps
+	// following the defaults if those change later.
 	var p *store.Policy
-	if r.FormValue("override") != "" {
-		v := formPolicy(r)
+	msg := "Saved. This repository follows the default automation settings."
+	if v := formPolicy(r); r.FormValue("reset") == "" && v != s.st.Config().Policy {
 		p = &v
+		msg = "Saved. This repository has its own automation settings."
 	}
 	if err := s.st.SetRepoPolicy(pathID(r), p); err != nil {
 		s.fail(w, err)
 		return
 	}
-	back(w, r, "/settings", "Repo saved")
+	back(w, r, "/settings", msg)
 }
 
 func (s *Server) deleteRepo(w http.ResponseWriter, r *http.Request) {
