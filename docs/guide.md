@@ -177,7 +177,7 @@ blue block is always the agent's writing. Nothing in it is on GitHub until you s
 
 A draft is a list of inline comments. Each one shows the code it is about, with the
 commented line's number highlighted, a severity (blocker, major, minor), and the comment
-text.
+text. The severity is only for you; what gets posted is the comment text alone.
 
 1. Read each comment against its code. Edit the text if you want to say it differently.
 2. Untick any comment you don't want posted.

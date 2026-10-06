@@ -550,6 +550,9 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 	return nil
 }
 
+// Severity is for the maintainer's eyes in revq. What goes to GitHub is the
+// comment text alone, as the maintainer left it.
+//
 // PostDraft sends a review to GitHub. With an event (COMMENT, APPROVE,
 // REQUEST_CHANGES) it is published. With an empty event it becomes a pending
 // review that only the maintainer can see, to be finished in GitHub's own UI.
@@ -567,10 +570,10 @@ func (e *Engine) PostDraft(ctx context.Context, d store.Draft, event, body strin
 			if inline && f.Inline {
 				r.Comments = append(r.Comments, github.ReviewComment{
 					Path: f.Path, Line: f.Line, Side: "RIGHT",
-					Body: fmt.Sprintf("**%s**: %s", f.Severity, f.Body),
+					Body: f.Body,
 				})
 			} else {
-				extra = append(extra, fmt.Sprintf("- `%s:%d` **%s**: %s", f.Path, f.Line, f.Severity, f.Body))
+				extra = append(extra, fmt.Sprintf("- `%s:%d` %s", f.Path, f.Line, f.Body))
 			}
 		}
 		r.Body = strings.TrimSpace(body)
