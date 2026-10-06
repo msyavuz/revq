@@ -17,6 +17,7 @@ import (
 	"github.com/msyavuz/revq/internal/github"
 	"github.com/msyavuz/revq/internal/pipeline"
 	"github.com/msyavuz/revq/internal/store"
+	"github.com/msyavuz/revq/internal/update"
 	"github.com/msyavuz/revq/internal/web"
 )
 
@@ -64,6 +65,31 @@ func resetPassword() error {
 	return nil
 }
 
+// selfUpdate replaces this binary with the latest release. It does not
+// restart anything; the service keeps running the old version until restarted.
+func selfUpdate() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	latest, err := update.Latest(ctx)
+	if err != nil {
+		return fmt.Errorf("checking for the latest release: %w", err)
+	}
+	if latest == version {
+		fmt.Println("revq", version, "is the latest release.")
+		return nil
+	}
+	if !update.Newer(latest, version) && version != "dev" {
+		fmt.Printf("This is revq %s; the latest release is %s. Nothing to do.\n", version, latest)
+		return nil
+	}
+	path, err := update.Apply(ctx, latest)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Updated %s from %s to %s.\nRestart revq to run it, for example: systemctl restart revq\n", path, version, latest)
+	return nil
+}
+
 func run(log *slog.Logger) error {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -72,8 +98,10 @@ func run(log *slog.Logger) error {
 		case "version", "--version", "-v":
 			fmt.Println("revq", version)
 			return nil
+		case "update":
+			return selfUpdate()
 		default:
-			return fmt.Errorf("unknown command %q (commands: version, reset-password)", os.Args[1])
+			return fmt.Errorf("unknown command %q (commands: version, update, reset-password)", os.Args[1])
 		}
 	}
 	token := githubToken()

@@ -19,13 +19,15 @@
       </div>
       <a class="title" href="/pr/{{.PR.ID}}">{{.PR.Title}}</a>
       {{with .PR.Assessment}}<p class="sum"><span>{{.Summary}}</span></p>{{end}}
-      {{if or .Risk .Decision .HasDraft .PR.Draft .Running .Pinned .Large}}
+      {{if or .Risk .Decision .HasDraft .PR.Draft .Running .Pinned .Large .AutoOn .AutoOff}}
       <div class="marks">
         {{if .Decision}}<span class="mark hl">decision needed</span>{{end}}
         {{if .HasDraft}}<span class="mark agent">review drafted{{if .DraftStale}}, outdated{{end}}</span>{{end}}
         {{if .Running}}<span class="mark agent">agent {{.Running}}</span>{{end}}
         {{if .Risk}}<span class="mark risk-{{.Risk}}">{{.Risk}} risk</span>{{end}}
         {{if .Large}}<span class="mark risk-medium">large change</span>{{end}}
+        {{if .AutoOn}}<span class="mark agent" title="Auto review is switched on for this PR">auto review</span>{{end}}
+        {{if .AutoOff}}<span class="mark" title="Auto review is switched off for this PR">auto review off</span>{{end}}
         {{if .PR.Draft}}<span class="mark">draft PR</span>{{end}}
         {{if .Pinned}}<span class="mark">pinned</span>{{end}}
       </div>

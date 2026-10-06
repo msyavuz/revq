@@ -30,6 +30,10 @@
 </header>
 {{if .Flash}}<div class="flash" role="status">{{.Flash}}</div>{{end}}
 <main>{{template "content" .}}</main>
-<footer class="foot-bar">revq {{.Version}} <a href="https://revq.dev" target="_blank" rel="noopener">Guide</a></footer>
+<footer class="foot-bar">
+  <span>revq {{.Version}}</span>
+  {{if .Update}}<a class="hl" href="https://github.com/msyavuz/revq/releases/tag/{{.Update}}" target="_blank" rel="noopener" title="Update with: revq update, then restart. Docker: docker compose pull && docker compose up -d">{{.Update}} is available</a>{{end}}
+  <a href="https://revq.dev" target="_blank" rel="noopener">Guide</a>
+</footer>
 </body>
 </html>{{end}}

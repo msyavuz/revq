@@ -100,11 +100,48 @@ type Config struct {
 	ReviewMaxChunks  int     `json:"review_max_chunks"`
 	ReviewBots       bool    `json:"review_bots"`
 	ReviewDrafts     bool    `json:"review_drafts"`
+	TrustedAuthors   string  `json:"trusted_authors"` // GitHub usernames, one per line
 	IgnoreGlobs      string  `json:"ignore_globs"`
 	Guidelines       string  `json:"guidelines"`
 	WebhookURL       string  `json:"webhook_url"`
 	TelegramToken    string  `json:"telegram_token"`
 	TelegramChatID   string  `json:"telegram_chat_id"`
+}
+
+// AuthorList returns the trusted usernames, trimmed, without blanks or a leading @.
+func (c Config) AuthorList() []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(c.TrustedAuthors, func(r rune) bool { return r == '\n' || r == ',' || r == ' ' || r == '\r' }) {
+		if f = strings.TrimPrefix(strings.TrimSpace(f), "@"); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// Trusts reports whether PRs from this author are auto reviewed regardless of
+// the repository's setting. GitHub usernames are case-insensitive.
+func (c Config) Trusts(login string) bool {
+	for _, a := range c.AuthorList() {
+		if strings.EqualFold(a, login) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetTrust adds or removes an author from the trusted list.
+func (c *Config) SetTrust(login string, trusted bool) {
+	var keep []string
+	for _, a := range c.AuthorList() {
+		if !strings.EqualFold(a, login) {
+			keep = append(keep, a)
+		}
+	}
+	if trusted {
+		keep = append(keep, login)
+	}
+	c.TrustedAuthors = strings.Join(keep, "\n")
 }
 
 func DefaultConfig() Config {
@@ -171,6 +208,7 @@ type PR struct {
 	AssessedSHA  string
 	PostedSHA    string
 	Avatar       string
+	AutoReview   int // per-PR choice: 1 on, 0 off, -1 follow the repository's setting
 	Requested    int // 1 my review is requested, 0 it isn't, -1 not tracked (repo scope "all")
 }
 
@@ -234,6 +272,7 @@ func Open(path string) (*Store, error) {
 		`ALTER TABLE repos ADD COLUMN scope TEXT NOT NULL DEFAULT 'requested'`,
 		`ALTER TABLE prs ADD COLUMN requested INTEGER NOT NULL DEFAULT -1`,
 		`ALTER TABLE prs ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prs ADD COLUMN auto_review INTEGER NOT NULL DEFAULT -1`,
 	} {
 		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return nil, err
@@ -359,7 +398,7 @@ func (s *Store) PolicyFor(repoID int64) Policy {
 const prCols = `p.id, p.repo_id, r.owner||'/'||r.name, p.number, p.title, p.body, p.author,
 	p.author_assoc, p.is_bot, p.url, p.state, p.draft, p.head_sha, p.base_ref, p.additions,
 	p.deletions, p.changed_files, p.ci, p.review_state, p.labels, p.created_at, p.updated_at,
-	p.col, p.col_override, p.override_sha, p.triage, p.triage_sha, p.posted_sha, p.requested, p.avatar
+	p.col, p.col_override, p.override_sha, p.triage, p.triage_sha, p.posted_sha, p.requested, p.avatar, p.auto_review
 	FROM prs p JOIN repos r ON r.id = p.repo_id `
 
 func scanPR(sc interface{ Scan(...any) error }) (PR, error) {
@@ -368,7 +407,7 @@ func scanPR(sc interface{ Scan(...any) error }) (PR, error) {
 	err := sc.Scan(&p.ID, &p.RepoID, &p.Repo, &p.Number, &p.Title, &p.Body, &p.Author,
 		&p.AuthorAssoc, &p.IsBot, &p.URL, &p.State, &p.Draft, &p.HeadSHA, &p.BaseRef, &p.Additions,
 		&p.Deletions, &p.ChangedFiles, &p.CI, &p.ReviewState, &labels, &p.CreatedAt, &p.UpdatedAt,
-		&p.Col, &p.ColOverride, &p.OverrideSHA, &triage, &p.AssessedSHA, &p.PostedSHA, &p.Requested, &p.Avatar)
+		&p.Col, &p.ColOverride, &p.OverrideSHA, &triage, &p.AssessedSHA, &p.PostedSHA, &p.Requested, &p.Avatar, &p.AutoReview)
 	if err != nil {
 		return p, err
 	}
@@ -460,6 +499,12 @@ func (s *Store) SetOverride(id int64, col, sha string) error {
 // from when a separate triage step produced it.
 func (s *Store) SetAssessment(id int64, a Assessment, sha string) error {
 	_, err := s.db.Exec(`UPDATE prs SET triage=?, triage_sha=? WHERE id=?`, toJSON(a), sha, id)
+	return err
+}
+
+// SetAutoReview stores the per-PR auto review choice: 1, 0, or -1 to follow the repository.
+func (s *Store) SetAutoReview(id int64, v int) error {
+	_, err := s.db.Exec(`UPDATE prs SET auto_review=? WHERE id=?`, v, id)
 	return err
 }
 

@@ -367,3 +367,22 @@ button.mini:hover { background: var(--pencil-wash); }
 
 .foot-bar { display: flex; gap: 14px; justify-content: center; padding: 18px 24px 28px; color: var(--ink-2); font-size: 0.8125rem; }
 .foot-bar a { color: var(--ink-2); }
+.foot-bar a.hl { color: var(--hl-ink); text-decoration: none; font-weight: 600; }
+
+/* per-PR auto review switch */
+.auto-toggle { display: contents; }
+button.switch { display: inline-flex; align-items: center; gap: 9px; }
+button.switch .knob {
+  position: relative; width: 30px; height: 17px; border-radius: 999px; flex: none;
+  background: var(--rule-strong); transition: background-color 150ms;
+}
+button.switch .knob::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%;
+  background: var(--slip); transition: transform 150ms;
+}
+button.switch[aria-checked="true"] { color: var(--pencil); border-color: var(--pencil); }
+button.switch[aria-checked="true"] .knob { background: var(--pencil); }
+button.switch[aria-checked="true"] .knob::after { transform: translateX(13px); }
+@media (prefers-reduced-motion: reduce) { button.switch .knob, button.switch .knob::after { transition: none; } }
+.person .trust { display: flex; align-items: center; gap: 6px; flex-basis: 100%; margin-top: 2px; }
+.person .trust button.mini { border-color: var(--pencil); padding: 1px 8px; }

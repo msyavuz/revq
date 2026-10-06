@@ -111,6 +111,14 @@ func (e *Engine) syncRepo(ctx context.Context, r store.Repo) error {
 		return err
 	}
 	policy := e.St.PolicyFor(r.ID)
+	// Whether my review was requested on each PR before this sync, to spot the
+	// moment a request goes away.
+	wasRequested := map[int]bool{}
+	if before, err := e.St.OpenPRs(r.ID); err == nil {
+		for _, p := range before {
+			wasRequested[p.Number] = p.Requested == 1
+		}
+	}
 	seen := map[int]bool{}
 	for _, g := range prs {
 		seen[g.Number] = true
@@ -129,13 +137,13 @@ func (e *Engine) syncRepo(ctx context.Context, r store.Repo) error {
 		if err != nil {
 			return err
 		}
-		if pr.Requested == 0 {
+		if requestAnswered(wasRequested[g.Number], pr.Requested) {
 			// I answered on GitHub directly, so an unposted draft is moot.
 			if err := e.St.SettleDrafts(id); err != nil {
 				return err
 			}
 		}
-		if policy.AutoReview && e.wantsAutoReview(pr, cfg) {
+		if e.wantsAutoReview(pr, policy, cfg) {
 			if _, err := e.St.EnqueueRun(id, "review", pr.HeadSHA); err != nil {
 				return err
 			}
@@ -167,6 +175,14 @@ func (e *Engine) syncRepo(ctx context.Context, r store.Repo) error {
 		e.RefreshColumn(ctx, pr.ID)
 	}
 	return nil
+}
+
+// requestAnswered reports whether a review request was just answered outside
+// revq: it was requested at the last sync and no longer is. A PR that simply
+// has no request (one you already reviewed and are drafting a follow-up for)
+// doesn't count, so its drafts are left alone.
+func requestAnswered(wasRequested bool, requestedNow int) bool {
+	return wasRequested && requestedNow == 0
 }
 
 // fetch returns the PRs a repo tracks and, per PR number, whether my review is
@@ -373,13 +389,47 @@ func newLabels(suggested, repo, have []string) []string {
 	return out
 }
 
+// AutoReviewOn reports whether auto review applies to a PR. The PR's own
+// switch wins if the maintainer set one; otherwise it is on when the
+// repository's policy says so or the author is on the trusted list.
+func AutoReviewOn(pr store.PR, policy store.Policy, cfg store.Config) bool {
+	if pr.AutoReview >= 0 {
+		return pr.AutoReview == 1
+	}
+	return policy.AutoReview || cfg.Trusts(pr.Author)
+}
+
+// SetAutoReview records the per-PR choice and, when it turns auto review on,
+// queues a review straight away instead of waiting for the next sync.
+func (e *Engine) SetAutoReview(prID int64, v int) error {
+	if err := e.St.SetAutoReview(prID, v); err != nil {
+		return err
+	}
+	pr, err := e.St.PR(prID)
+	if err != nil {
+		return err
+	}
+	if pr.State == "open" && e.wantsAutoReview(pr, e.St.PolicyFor(pr.RepoID), e.St.Config()) {
+		return e.Enqueue(prID, "review")
+	}
+	return nil
+}
+
 // wantsAutoReview decides whether a PR gets an unattended review. Each commit
 // is reviewed at most once, and pushes don't re-burn tokens while a draft is
 // still waiting: review once, then again only after the previous review was
 // posted (or answered on GitHub) and the author has pushed.
-func (e *Engine) wantsAutoReview(pr store.PR, cfg store.Config) bool {
+func (e *Engine) wantsAutoReview(pr store.PR, policy store.Policy, cfg store.Config) bool {
+	if !AutoReviewOn(pr, policy, cfg) {
+		return false
+	}
 	// Requested == 0 means the ball is with the author; no tokens until they ask again.
-	if pr.Requested == 0 || (pr.IsBot && !cfg.ReviewBots) || (pr.Draft && !cfg.ReviewDrafts) {
+	if pr.Requested == 0 {
+		return false
+	}
+	// The bot and draft filters are for the blanket policy. Turning auto review
+	// on for one PR by hand says "this one", whatever kind it is.
+	if pr.AutoReview != 1 && ((pr.IsBot && !cfg.ReviewBots) || (pr.Draft && !cfg.ReviewDrafts)) {
 		return false
 	}
 	if e.St.HasRun(pr.ID, "review", pr.HeadSHA) {

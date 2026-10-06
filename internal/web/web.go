@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"html/template"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/yuin/goldmark"
@@ -20,6 +22,7 @@ import (
 	"github.com/msyavuz/revq/internal/notify"
 	"github.com/msyavuz/revq/internal/pipeline"
 	"github.com/msyavuz/revq/internal/store"
+	"github.com/msyavuz/revq/internal/update"
 )
 
 //go:embed templates static
@@ -31,6 +34,7 @@ type Server struct {
 	log     *slog.Logger
 	logins  *limiter
 	version string
+	latest  atomic.Value // newest release tag, checked in the background
 	tpl     map[string]*template.Template
 }
 
@@ -58,6 +62,8 @@ func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger, version string
 
 	s.tpl["login"] = template.Must(template.New("").Funcs(funcs).ParseFS(assets, "templates/login.html"))
 
+	go s.watchReleases()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("POST /login", s.login)
@@ -72,8 +78,11 @@ func New(st *store.Store, eng *pipeline.Engine, log *slog.Logger, version string
 	mux.HandleFunc("GET /pr/{id}", s.pr)
 	mux.HandleFunc("POST /pr/{id}/move", s.move)
 	mux.HandleFunc("POST /pr/{id}/run", s.run)
+	mux.HandleFunc("POST /pr/{id}/auto", s.setAuto)
+	mux.HandleFunc("POST /pr/{id}/trust", s.setTrust)
 	mux.HandleFunc("POST /draft/{id}/post", s.postDraft)
 	mux.HandleFunc("POST /draft/{id}/discard", s.discardDraft)
+	mux.HandleFunc("POST /draft/{id}/finished", s.finishedDraft)
 	mux.HandleFunc("GET /settings", s.settings)
 	mux.HandleFunc("POST /settings", s.saveSettings)
 	mux.HandleFunc("POST /settings/test-notify", s.testNotify)
@@ -108,6 +117,7 @@ type page struct {
 	Queued     int
 	OverBudget bool
 	Version    string
+	Update     string // a newer release, if there is one
 	Data       any
 }
 
@@ -115,7 +125,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name, title stri
 	now := time.Now()
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	p := page{
-		Title: title, Flash: r.URL.Query().Get("msg"), Data: data, Version: s.version,
+		Title: title, Flash: r.URL.Query().Get("msg"), Data: data, Version: s.version, Update: s.updateAvailable(),
 		Spend: s.st.SpendSince(midnight), Budget: s.st.Config().DailyBudgetUSD,
 		Queued: s.st.QueuedCount(), OverBudget: s.eng.OverBudget(),
 	}
@@ -154,6 +164,8 @@ type card struct {
 	Large      bool
 	Pinned     bool
 	Reviewed   bool // a review was already posted for this exact commit
+	AutoOn     bool // auto review was switched on for this PR specifically
+	AutoOff    bool // auto review was switched off for this PR specifically
 }
 
 type column struct {
@@ -183,6 +195,26 @@ func shortNote(note string) string {
 	}
 	n := strings.Count(list, ", ") + 1
 	return fmt.Sprintf("Partial review: %d changed files were over the review size budget or had no diff on GitHub, so the agent didn't read them.", n)
+}
+
+// watchReleases looks for a newer release now and then, so the footer can
+// say when one is out. It only reads GitHub's public release list.
+func (s *Server) watchReleases() {
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if tag, err := update.Latest(ctx); err == nil {
+			s.latest.Store(tag)
+		}
+		cancel()
+		time.Sleep(12 * time.Hour)
+	}
+}
+
+func (s *Server) updateAvailable() string {
+	if tag, _ := s.latest.Load().(string); update.Newer(tag, s.version) {
+		return tag
+	}
+	return ""
 }
 
 // initial is the fallback shown when an author has no profile picture.
@@ -219,6 +251,14 @@ func (s *Server) columns() ([]column, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Whether each repository auto reviews by default, to tell an exception from the rule.
+	cfg := s.st.Config()
+	policyOn := map[int64]bool{}
+	if repos, err := s.st.Repos(); err == nil {
+		for _, r := range repos {
+			policyOn[r.ID] = s.st.PolicyFor(r.ID).AutoReview
+		}
+	}
 	byCol := map[string][]card{}
 	for _, pr := range prs {
 		c := card{PR: pr, Running: active[pr.ID], Large: pr.Additions+pr.Deletions >= largeChange}
@@ -230,6 +270,9 @@ func (s *Server) columns() ([]column, error) {
 			c.HasDraft, c.DraftStale = true, sha != pr.HeadSHA
 		}
 		c.Reviewed = pr.PostedSHA != "" && pr.PostedSHA == pr.HeadSHA
+		// Only mark exceptions: on where the default is off, off where it is on.
+		byDefault := policyOn[pr.RepoID] || cfg.Trusts(pr.Author)
+		c.AutoOn, c.AutoOff = pr.AutoReview == 1 && !byDefault, pr.AutoReview == 0 && byDefault
 		c.Pinned = pr.State == "open" && pr.ColOverride != "" && pr.OverrideSHA == pr.HeadSHA
 		col := pr.Col
 		if !pipeline.ValidColumn(col) {
@@ -296,6 +339,13 @@ func (s *Server) pr(w http.ResponseWriter, r *http.Request) {
 	}
 	active, _ := s.st.ActiveRuns()
 	data["Running"] = active[pr.ID]
+	policy := s.st.PolicyFor(pr.RepoID)
+	cfg := s.st.Config()
+	data["AutoOn"] = pipeline.AutoReviewOn(pr, policy, cfg)
+	data["AutoSet"] = pr.AutoReview >= 0
+	data["Trusted"] = cfg.Trusts(pr.Author)
+	// What the switch falls back to when this PR has no setting of its own.
+	data["RepoAuto"] = policy.AutoReview || cfg.Trusts(pr.Author)
 	// What the review button should say depends on what already exists.
 	data["ReviewLabel"] = "Draft review"
 	if d, ok := s.st.LatestDraft(pr.ID); ok {
@@ -369,6 +419,52 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	back(w, r, fmt.Sprintf("/pr/%d", id), msg)
 }
 
+// setAuto switches auto review on or off for one PR, or back to following
+// its repository's setting.
+func (s *Server) setAuto(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	v, msg := -1, "This PR uses the default auto review setting again"
+	switch r.FormValue("auto") {
+	case "on":
+		v, msg = 1, "Auto review is on for this PR"
+	case "off":
+		v, msg = 0, "Auto review is off for this PR"
+	}
+	if err := s.eng.SetAutoReview(id, v); err != nil {
+		s.fail(w, err)
+		return
+	}
+	back(w, r, fmt.Sprintf("/pr/%d", id), msg)
+}
+
+// setTrust adds or removes a PR's author from the trusted list, then syncs so
+// their other open PRs are picked up without waiting for the next poll.
+func (s *Server) setTrust(w http.ResponseWriter, r *http.Request) {
+	pr, err := s.st.PR(pathID(r))
+	if err != nil || pr.Author == "" {
+		http.NotFound(w, r)
+		return
+	}
+	trusted := r.FormValue("trust") == "on"
+	c := s.st.Config()
+	c.SetTrust(pr.Author, trusted)
+	if err := s.st.SaveConfig(c); err != nil {
+		s.fail(w, err)
+		return
+	}
+	msg := pr.Author + " is no longer a trusted author"
+	if trusted {
+		msg = "PRs from " + pr.Author + " are now auto reviewed"
+		// This PR first; the rest follow on the sync.
+		if err := s.eng.SetAutoReview(pr.ID, pr.AutoReview); err != nil {
+			s.fail(w, err)
+			return
+		}
+		s.eng.PollNow()
+	}
+	back(w, r, fmt.Sprintf("/pr/%d", pr.ID), msg)
+}
+
 func (s *Server) postDraft(w http.ResponseWriter, r *http.Request) {
 	d, err := s.st.Draft(pathID(r))
 	if err != nil || d.Status != "draft" {
@@ -405,6 +501,27 @@ func (s *Server) postDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	back(w, r, dest, done)
+}
+
+// finishedDraft records that a pending review was submitted on GitHub. revq
+// notices by itself when the review request clears; this covers PRs that had
+// no open request to clear.
+func (s *Server) finishedDraft(w http.ResponseWriter, r *http.Request) {
+	d, err := s.st.Draft(pathID(r))
+	if err != nil || d.Status != "pending" {
+		http.Error(w, "no pending review to finish", http.StatusNotFound)
+		return
+	}
+	if err := s.st.SetDraftStatus(d.ID, "posted"); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.st.SetPostedSHA(d.PRID, d.HeadSHA); err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.eng.RefreshColumn(r.Context(), d.PRID)
+	back(w, r, fmt.Sprintf("/pr/%d", d.PRID), "Marked as submitted")
 }
 
 func (s *Server) discardDraft(w http.ResponseWriter, r *http.Request) {
@@ -474,6 +591,8 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	c.ReviewMaxChunks = num("review_max_chunks", c.ReviewMaxChunks)
 	c.ReviewBots = r.FormValue("review_bots") != ""
 	c.ReviewDrafts = r.FormValue("review_drafts") != ""
+	c.TrustedAuthors = r.FormValue("trusted_authors")
+	c.TrustedAuthors = strings.Join(c.AuthorList(), "\n")
 	c.IgnoreGlobs = strings.TrimSpace(r.FormValue("ignore_globs"))
 	c.Guidelines = strings.TrimSpace(r.FormValue("guidelines"))
 	c.WebhookURL = strings.TrimSpace(r.FormValue("webhook_url"))

@@ -13,6 +13,14 @@
       {{else if .ReviewLabel}}
       <form method="post" action="/pr/{{.PR.ID}}/run"{{if .ReplacesDraft}} onsubmit="return confirm('This replaces the current draft, including any edits you made to it.')"{{end}}><input type="hidden" name="kind" value="review"><button class="agent">{{.ReviewLabel}}</button></form>
       {{end}}
+      {{if eq .PR.State "open"}}
+      <form method="post" action="/pr/{{.PR.ID}}/auto" class="auto-toggle">
+        <button class="switch" name="auto" value="{{if .AutoOn}}off{{else}}on{{end}}" role="switch" aria-checked="{{if .AutoOn}}true{{else}}false{{end}}" title="When on, the agent drafts a review for this PR whenever your review is requested on new commits. Nothing is posted without you unless auto post is on.">
+          <span class="knob" aria-hidden="true"></span>Auto review this PR
+        </button>
+        {{if .AutoSet}}<button class="ghost" name="auto" value="default" title="Stop treating this PR differently from the repository setting and trusted authors">{{if .RepoAuto}}Use the default (on){{else}}Use the default (off){{end}}</button>{{end}}
+      </form>
+      {{end}}
       {{if .Pinned}}<form method="post" action="/pr/{{.PR.ID}}/move"><input type="hidden" name="col" value="auto"><button class="ghost">Unpin from column</button></form>{{end}}
     </div>
   </header>
@@ -42,7 +50,10 @@
 
       {{if eq .Status "pending"}}
       <p>Check the comments against the code on GitHub, then submit from the "Finish your review" button there.</p>
-      <div class="actions"><a class="btn primary" href="{{$.Data.PR.URL}}/files" target="_blank" rel="noopener">Finish the review on GitHub</a></div>
+      <div class="actions">
+        <a class="btn primary" href="{{$.Data.PR.URL}}/files" target="_blank" rel="noopener">Finish the review on GitHub</a>
+        <form method="post" action="/draft/{{.ID}}/finished"><button class="ghost" title="revq usually notices by itself on the next sync. Use this if the card is still here after you've submitted.">I've submitted it</button></form>
+      </div>
       {{end}}
 
       {{if eq .Status "draft"}}
@@ -84,7 +95,8 @@
   <aside class="pr-rail">
     <h3 class="rail-title">From GitHub</h3>
     <dl class="facts">
-      <dt>Author</dt><dd class="person">{{if .PR.Avatar}}<img class="avatar" src="{{.PR.Avatar}}" alt="" width="20" height="20">{{else}}<span class="avatar">{{initial .PR.Author}}</span>{{end}} {{.PR.Author}}{{if .PR.AuthorAssoc}} <span class="muted">{{.PR.AuthorAssoc}}</span>{{end}}</dd>
+      <dt>Author</dt><dd class="person">{{if .PR.Avatar}}<img class="avatar" src="{{.PR.Avatar}}" alt="" width="20" height="20">{{else}}<span class="avatar">{{initial .PR.Author}}</span>{{end}} {{.PR.Author}}{{if .PR.AuthorAssoc}} <span class="muted">{{.PR.AuthorAssoc}}</span>{{end}}
+        <form method="post" action="/pr/{{.PR.ID}}/trust" class="trust">{{if .Trusted}}<span class="mark agent">trusted author</span> <button class="mini" name="trust" value="off">Stop trusting</button>{{else}}<button class="mini" name="trust" value="on" title="Auto review every pull request from this author, in any repository">Trust this author</button>{{end}}</form></dd>
       <dt>Size</dt><dd><span class="diff"><span class="add">+{{.PR.Additions}}</span> <span class="del">−{{.PR.Deletions}}</span><span class="split" style="--a: {{addShare .PR.Additions .PR.Deletions}}%"></span></span> in {{.PR.ChangedFiles}} files</dd>
       <dt>State</dt><dd>{{.PR.State}}{{if .PR.Draft}}, draft{{end}}</dd>
       {{if .PR.CI}}<dt>CI</dt><dd><span class="ci ci-{{.PR.CI}}"></span> {{.PR.CI}}</dd>{{end}}

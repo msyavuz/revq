@@ -54,6 +54,8 @@
     <h2>Default autonomy</h2>
     <p class="muted">What the agent does on every sync without asking. With everything off, it only runs when you press "Draft review" on a card.</p>
     {{template "policy" .Policy}}
+    <label>Trusted authors: always auto review pull requests from these GitHub users, one per line
+      <textarea name="trusted_authors" rows="3" placeholder="octocat">{{.TrustedAuthors}}</textarea></label>
     <label class="check"><input type="checkbox" name="review_bots"{{if .ReviewBots}} checked{{end}}> Auto review PRs opened by bots</label>
     <label class="check"><input type="checkbox" name="review_drafts"{{if .ReviewDrafts}} checked{{end}}> Auto review draft PRs</label>
   </section>
