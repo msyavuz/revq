@@ -27,26 +27,55 @@ const repo = "msyavuz/revq"
 
 var client = &http.Client{Timeout: 2 * time.Minute}
 
-func get(ctx context.Context, url string) ([]byte, error) {
+// statusError is a non-200 answer, kept so callers can react to the code.
+type statusError struct {
+	url    string
+	status string
+	code   int
+}
+
+func (e *statusError) Error() string { return e.url + ": " + e.status }
+
+func get(ctx context.Context, url, token string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "revq-update")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", url, resp.Status)
+		return nil, &statusError{url: url, status: resp.Status, code: resp.StatusCode}
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 200<<20))
 }
 
+func apiToken() string {
+	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+		return t
+	}
+	return os.Getenv("GH_TOKEN")
+}
+
 // Latest returns the tag of the newest full release, such as "v0.2.0".
 func Latest(ctx context.Context) (string, error) {
-	body, err := get(ctx, "https://api.github.com/repos/"+repo+"/releases/latest")
+	const url = "https://api.github.com/repos/" + repo + "/releases/latest"
+	// GitHub allows only a few dozen anonymous API calls an hour per address,
+	// which shared addresses (CI runners, some home networks) can exhaust.
+	// Sending the token revq already has lifts that. The release list is
+	// public, so a token GitHub rejects must not stand in the way: ask again
+	// without it.
+	body, err := get(ctx, url, apiToken())
+	var se *statusError
+	if errors.As(err, &se) && (se.code == http.StatusUnauthorized || se.code == http.StatusForbidden) && apiToken() != "" {
+		body, err = get(ctx, url, "")
+	}
 	if err != nil {
 		return "", err
 	}
@@ -110,7 +139,7 @@ func Apply(ctx context.Context, tag string) (string, error) {
 	name := fmt.Sprintf("revq_%s_%s_%s", tag, runtime.GOOS, runtime.GOARCH)
 	base := "https://github.com/" + repo + "/releases/download/" + tag + "/"
 
-	sums, err := get(ctx, base+"checksums.txt")
+	sums, err := get(ctx, base+"checksums.txt", "")
 	if err != nil {
 		return "", err
 	}
@@ -124,7 +153,7 @@ func Apply(ctx context.Context, tag string) (string, error) {
 	if want == "" {
 		return "", fmt.Errorf("release %s has no build for %s/%s", tag, runtime.GOOS, runtime.GOARCH)
 	}
-	archive, err := get(ctx, base+name+".tar.gz")
+	archive, err := get(ctx, base+name+".tar.gz", "")
 	if err != nil {
 		return "", err
 	}
