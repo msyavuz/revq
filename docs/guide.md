@@ -106,8 +106,13 @@ Then start it:
 
     sudo systemctl enable --now revq
 
-To update, replace `/usr/local/bin/revq` with the binary from a newer release and run
-`sudo systemctl restart revq`. To build from source instead you need Go 1.25 or newer:
+To update, let revq replace itself with the latest release, then restart it:
+
+    sudo revq update
+    sudo systemctl restart revq
+
+`revq update` downloads the release for your machine, checks it against the release's
+checksum, and swaps the binary in place. Your data is untouched. To build from source instead you need Go 1.25 or newer:
 `go build -o revq ./cmd/revq`.
 
 | Variable | Default | What it does |
@@ -213,6 +218,16 @@ switches are in Settings, with an override per repository.
 
 Bot PRs and draft PRs are skipped by auto review unless you tick their boxes.
 
+**Trusted authors** are auto reviewed even when the repository's switch is off. List
+their GitHub usernames in Settings, or press "Trust this author" on one of their PRs. It
+applies to all their pull requests in every repository revq tracks.
+
+You can also decide per pull request. On a PR's page, the **Auto review this PR** switch
+turns it on for that PR while the repository's setting is off, or off for that PR while
+the repository's is on. Turning it on drafts a review straight away and again whenever
+the author pushes and your review is requested, including for bot and draft PRs. "Use
+the default" removes the exception. The board marks PRs that have one.
+
 ## Keeping cost down
 
 A review of a few hundred changed lines costs a few cents. These settings control it:
@@ -239,10 +254,15 @@ Settings, then press "Send test notification".
 
 ## Maintenance
 
-**Update:**
+**Update:** the bottom of every page says when a newer version is out. With Docker:
 
     docker compose pull
     docker compose up -d
+
+Without Docker: `sudo revq update`, then `sudo systemctl restart revq`.
+
+Updating keeps your board, drafts, settings and sign-in. revq upgrades its own data on
+start and syncs with GitHub straight away; nothing is reviewed again.
 
 The running version is shown at the bottom of every page, and by
 `docker compose run --rm revq version`. To go back to an earlier version, set that
