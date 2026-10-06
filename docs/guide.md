@@ -162,6 +162,10 @@ On a card:
   was last updated.
 - A GitHub icon that opens the PR on GitHub.
 
+Above the lanes you can filter the board by repository, by author, and by words in the
+title or a PR number. The filter is part of the page's address, so you can bookmark a
+filtered board, and it stays in place while the board refreshes.
+
 Click a card to open it. Hover over a card for **Draft review**, which asks the agent to
 review that PR; the card moves to "Needs you" when the draft is ready.
 
