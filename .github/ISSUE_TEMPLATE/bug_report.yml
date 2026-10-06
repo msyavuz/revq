@@ -1,0 +1,37 @@
+name: Bug report
+description: Something in revq doesn't work the way the guide says it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: revq version
+      description: Shown at the bottom of every page, or by `revq version`.
+      placeholder: v0.2.1
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run it
+      options:
+        - Docker image
+        - Release binary
+        - Built from source
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error text
+      description: >-
+        From `docker compose logs revq` or `journalctl -u revq`, or the error shown in the
+        app. Remove tokens and anything private first.
+      render: text

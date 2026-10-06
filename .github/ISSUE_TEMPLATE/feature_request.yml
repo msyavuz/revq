@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest something revq should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        revq is kept small on purpose. Please read the Scope section of CONTRIBUTING.md
+        first; ideas that turn it into a GitHub replacement are unlikely to be taken.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do as a maintainer that revq makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: How you imagine it working. Rough is fine.

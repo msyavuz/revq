@@ -90,6 +90,11 @@ on the Settings page.
 - The reviewer sees the diff, not a checkout of the repository.
 - No automated tests yet.
 
+## Contributing
+
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first,
+especially the part about scope.
+
 ## License
 
 MIT. Bundled fonts (Schibsted Grotesk, Commit Mono) are under the SIL Open Font License;
