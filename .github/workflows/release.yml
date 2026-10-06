@@ -46,6 +46,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # revq has to reach GitHub over HTTPS from inside the image. `revq update`
+      # makes that call and exits non-zero if it can't, which catches an image
+      # without a CA bundle before the release is announced.
+      - name: Smoke-test the published image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm "$IMAGE" version
+          docker run --rm -e GITHUB_TOKEN "$IMAGE" update
       - name: Build release binaries
         run: |
           mkdir -p build dist

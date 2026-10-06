@@ -1,0 +1,43 @@
+name: Image
+
+# Builds the Docker image and checks it can make a verified HTTPS call, for
+# changes that can affect the image. The Go checks live in ci.yml.
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - go.mod
+      - go.sum
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/image.yml"
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - go.mod
+      - go.sum
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/image.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build --build-arg VERSION=ci -t revq:ci .
+      - name: The binary runs
+        run: docker run --rm revq:ci version
+      # `revq update` asks GitHub for the latest release. With no CA bundle in
+      # the image this fails with "certificate signed by unknown authority".
+      - name: The image can reach GitHub over HTTPS
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: docker run --rm -e GITHUB_TOKEN revq:ci update
+      - name: The Claude Code CLI is installed
+        run: docker run --rm --entrypoint claude revq:ci --version
