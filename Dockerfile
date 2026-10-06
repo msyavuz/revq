@@ -11,7 +11,11 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /revq ./cmd/revq
 
 FROM node:22-slim
-RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force \
+# node:22-slim ships no CA bundle, and the static Go binary reads its roots from
+# /etc/ssl/certs, so without this every api.github.com call fails to verify.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code && npm cache clean --force \
     && mkdir /data && chown node:node /data
 COPY --from=build /revq /usr/local/bin/revq
 USER node
