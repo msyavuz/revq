@@ -1,12 +1,37 @@
 {{define "content"}}
-{{if .Data.NoRepos}}<p class="empty">No repositories yet. <a href="/settings">Add one in Settings</a> and your review requests show up here.</p>{{end}}
-<div id="board" class="board" hx-get="/board" hx-trigger="every 20s [!document.body.classList.contains('dragging')]" hx-swap="innerHTML">
-{{template "columns" .Data.Columns}}
+{{with .Data}}
+{{if .NoRepos}}<p class="empty">No repositories yet. <a href="/settings">Add one in Settings</a> and your review requests show up here.</p>{{end}}
+{{if .Total}}
+<form class="filters" method="get" action="/" role="search" aria-label="Filter the board"
+      hx-get="/" hx-target="#board" hx-select="#board" hx-swap="outerHTML" hx-select-oob="#filter-status" hx-push-url="true"
+      hx-trigger="change, search, keyup changed delay:300ms from:#filter-q">
+  {{if gt (len .Repos) 1}}
+  <label>Repository
+    <select name="repo">
+      <option value="">All repositories</option>
+      {{range .Repos}}<option value="{{.}}"{{if eq . $.Data.Filter.Repo}} selected{{end}}>{{.}}</option>{{end}}
+    </select></label>
+  {{end}}
+  <label>Author
+    <select name="author">
+      <option value="">Everyone</option>
+      {{range .Authors}}<option value="{{.}}"{{if eq . $.Data.Filter.Author}} selected{{end}}>{{.}}</option>{{end}}
+    </select></label>
+  <label>Title or number
+    <input type="search" id="filter-q" name="q" value="{{.Filter.Q}}" placeholder="fix auth, #812" autocomplete="off"></label>
+  <noscript><button>Filter</button></noscript>
+  <span id="filter-status" class="filter-status">{{if .Filter.Active}}Showing {{.Shown}} of {{.Total}} <a href="/">Clear filters</a>{{end}}</span>
+</form>
+{{end}}
+<div id="board" class="board" hx-get="/board{{.Filter.Query}}" hx-trigger="every 20s [!document.body.classList.contains('dragging')]" hx-swap="innerHTML">
+{{template "columns" .}}
 </div>
+{{end}}
 {{end}}
 
 {{define "columns"}}
-{{range .}}{{$col := .Key}}
+{{$query := .Filter.Query}}
+{{range .Columns}}{{$col := .Key}}
 <section class="col col-{{.Key}}" data-col="{{.Key}}" aria-label="{{.Title}}">
   <h2 title="{{.Hint}}"><span class="lane-name">{{.Title}}</span> <span class="count">{{len .Cards}}</span></h2>
   <div class="cards">
@@ -39,8 +64,8 @@
         {{if .PR.CI}}<span class="ci ci-{{.PR.CI}}" title="CI {{.PR.CI}}"></span>{{end}}
         <span class="when">{{ago .PR.UpdatedAt}}</span>
         {{if and (not .Running) (not .Reviewed) (ne $col "done")}}
-          {{if not .HasDraft}}<button class="mini" hx-post="/pr/{{.PR.ID}}/run" hx-vals='{"kind":"review"}' hx-target="#board" hx-swap="innerHTML" title="The agent reads this PR and drafts a review. Nothing is posted.">Draft review</button>
-          {{else if .DraftStale}}<button class="mini" hx-post="/pr/{{.PR.ID}}/run" hx-vals='{"kind":"review"}' hx-target="#board" hx-swap="innerHTML" hx-confirm="This replaces the current draft, including any edits you made to it." title="The draft was written before the latest commits.">Redraft review</button>{{end}}
+          {{if not .HasDraft}}<button class="mini" hx-post="/pr/{{.PR.ID}}/run{{$query}}" hx-vals='{"kind":"review"}' hx-target="#board" hx-swap="innerHTML" title="The agent reads this PR and drafts a review. Nothing is posted.">Draft review</button>
+          {{else if .DraftStale}}<button class="mini" hx-post="/pr/{{.PR.ID}}/run{{$query}}" hx-vals='{"kind":"review"}' hx-target="#board" hx-swap="innerHTML" hx-confirm="This replaces the current draft, including any edits you made to it." title="The draft was written before the latest commits.">Redraft review</button>{{end}}
         {{end}}
         <a class="gh" href="{{.PR.URL}}" target="_blank" rel="noopener" draggable="false" title="Open on GitHub" aria-label="Open {{repoName .PR.Repo}} #{{.PR.Number}} on GitHub"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
       </div>

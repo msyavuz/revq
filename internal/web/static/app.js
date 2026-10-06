@@ -31,7 +31,8 @@ document.addEventListener('drop', (e) => {
   if (!dragged || !col || col.dataset.col === 'done') return;
   e.preventDefault();
   if (dragged.closest('.col') === col) return;
-  htmx.ajax('POST', `/pr/${dragged.dataset.id}/move`, {
+  // Keep the board's filter (in the page URL) so the reply shows the same cards.
+  htmx.ajax('POST', `/pr/${dragged.dataset.id}/move${window.location.search}`, {
     target: '#board',
     swap: 'innerHTML',
     values: { col: col.dataset.col },

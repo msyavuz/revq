@@ -246,19 +246,108 @@ const largeChange = 1500
 
 var riskRank = map[string]int{"high": 0, "medium": 1, "low": 2, "": 3}
 
-func (s *Server) columns() ([]column, error) {
+// boardFilter narrows the board. It lives in the URL's query string, so a
+// filtered board can be reloaded, bookmarked, and survives the board's own
+// refreshes.
+type boardFilter struct {
+	Repo   string // owner/name
+	Author string
+	Q      string // words in the title, or a PR number
+}
+
+func filterFrom(r *http.Request) boardFilter {
+	q := r.URL.Query()
+	return boardFilter{
+		Repo:   strings.TrimSpace(q.Get("repo")),
+		Author: strings.TrimSpace(q.Get("author")),
+		Q:      strings.TrimSpace(q.Get("q")),
+	}
+}
+
+func (f boardFilter) Active() bool { return f.Repo != "" || f.Author != "" || f.Q != "" }
+
+// Query is the filter as a URL suffix, "?repo=..." or "" when nothing is set.
+func (f boardFilter) Query() string {
+	v := url.Values{}
+	if f.Repo != "" {
+		v.Set("repo", f.Repo)
+	}
+	if f.Author != "" {
+		v.Set("author", f.Author)
+	}
+	if f.Q != "" {
+		v.Set("q", f.Q)
+	}
+	if len(v) == 0 {
+		return ""
+	}
+	return "?" + v.Encode()
+}
+
+func (f boardFilter) match(pr store.PR) bool {
+	if f.Repo != "" && !strings.EqualFold(pr.Repo, f.Repo) {
+		return false
+	}
+	if f.Author != "" && !strings.EqualFold(pr.Author, f.Author) {
+		return false
+	}
+	if f.Q != "" {
+		title := strings.ToLower(pr.Title)
+		num := strconv.Itoa(pr.Number)
+		for _, word := range strings.Fields(strings.ToLower(f.Q)) {
+			if !strings.Contains(title, word) && strings.TrimPrefix(word, "#") != num {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// boardView is everything the board template needs.
+type boardView struct {
+	Columns []column
+	Filter  boardFilter
+	Repos   []string // every repository with a card, for the filter
+	Authors []string // every author with a card, for the filter
+	Shown   int
+	Total   int
+	NoRepos bool
+}
+
+func (s *Server) boardView(f boardFilter) (boardView, error) {
+	v := boardView{Filter: f}
 	prs, err := s.st.BoardPRs()
 	if err != nil {
-		return nil, err
+		return v, err
 	}
 	active, err := s.st.ActiveRuns()
 	if err != nil {
-		return nil, err
+		return v, err
 	}
 	drafts, err := s.st.PendingDrafts()
 	if err != nil {
-		return nil, err
+		return v, err
 	}
+	v.Total = len(prs)
+	repoSeen, authorSeen := map[string]bool{}, map[string]bool{}
+	kept := prs[:0:0]
+	for _, pr := range prs {
+		if !repoSeen[pr.Repo] {
+			repoSeen[pr.Repo] = true
+			v.Repos = append(v.Repos, pr.Repo)
+		}
+		if pr.Author != "" && !authorSeen[strings.ToLower(pr.Author)] {
+			authorSeen[strings.ToLower(pr.Author)] = true
+			v.Authors = append(v.Authors, pr.Author)
+		}
+		if f.match(pr) {
+			kept = append(kept, pr)
+		}
+	}
+	sort.Strings(v.Repos)
+	sort.Slice(v.Authors, func(i, j int) bool { return strings.ToLower(v.Authors[i]) < strings.ToLower(v.Authors[j]) })
+	prs = kept
+	v.Shown = len(prs)
 	// Whether each repository auto reviews by default, to tell an exception from the rule.
 	cfg := s.st.Config()
 	policyOn := map[int64]bool{}
@@ -295,31 +384,38 @@ func (s *Server) columns() ([]column, error) {
 	if done := byCol[pipeline.ColDone]; len(done) > 25 {
 		byCol[pipeline.ColDone] = done[:25]
 	}
-	var out []column
 	for _, c := range pipeline.Columns {
-		out = append(out, column{Key: c.Key, Title: c.Title, Hint: c.Hint, Empty: c.Empty, Cards: byCol[c.Key]})
+		empty := c.Empty
+		if f.Active() {
+			empty = "Nothing here matches the filter."
+		}
+		v.Columns = append(v.Columns, column{Key: c.Key, Title: c.Title, Hint: c.Hint, Empty: empty, Cards: byCol[c.Key]})
 	}
-	return out, nil
+	return v, nil
 }
 
 func (s *Server) board(w http.ResponseWriter, r *http.Request) {
-	cols, err := s.columns()
+	v, err := s.boardView(filterFrom(r))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	repos, _ := s.st.Repos()
-	s.render(w, r, "board", "Board", map[string]any{"Columns": cols, "NoRepos": len(repos) == 0})
+	v.NoRepos = len(repos) == 0
+	s.render(w, r, "board", "Board", v)
 }
 
+// boardFragment renders just the lanes. Requests that change the board (a
+// move, a queued review) carry the filter in their URL so the reply matches
+// what the page is showing.
 func (s *Server) boardFragment(w http.ResponseWriter, r *http.Request) {
-	cols, err := s.columns()
+	v, err := s.boardView(filterFrom(r))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tpl["board"].ExecuteTemplate(w, "columns", cols); err != nil {
+	if err := s.tpl["board"].ExecuteTemplate(w, "columns", v); err != nil {
 		s.log.Error("render", "err", err)
 	}
 }
