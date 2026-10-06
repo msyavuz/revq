@@ -398,3 +398,13 @@ button.switch[aria-checked="true"] .knob::after { transform: translateX(13px); }
   .filters { padding: 12px 16px 0; }
   .filters label, .filters select, .filters input, .filters input[type="search"] { width: 100%; min-width: 0; }
 }
+
+/* the agent's merge brief */
+.ready { background: var(--slip); border: 1px solid var(--add); border-radius: 8px; padding: 14px 18px 12px; margin: 4px 0 16px; }
+.ready h3 { margin: 0 0 6px; color: var(--add); font-size: 1rem; }
+.ready-note { margin: 0 0 10px; color: var(--ink-2); font-size: 0.875rem; max-width: 70ch; }
+.ready ul { margin: 0 0 12px; padding-left: 20px; }
+.ready li { margin: 4px 0; max-width: 70ch; }
+.ready-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 0.875rem; }
+.ready-facts dt { color: var(--ink-2); }
+.ready-facts dd { margin: 0; }

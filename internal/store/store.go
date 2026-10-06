@@ -176,6 +176,10 @@ type Assessment struct {
 	NeedsMaintainer     bool     `json:"needs_maintainer"`
 	MaintainerQuestions []string `json:"maintainer_questions"`
 	SuggestedLabels     []string `json:"suggested_labels"`
+	// Ready is set when the review read the whole change and found nothing.
+	// ReadyOverview is the reviewer's short brief for the merge decision.
+	Ready         bool     `json:"ready"`
+	ReadyOverview []string `json:"ready_overview"`
 }
 
 type PR struct {
@@ -208,6 +212,7 @@ type PR struct {
 	AssessedSHA  string
 	PostedSHA    string
 	Avatar       string
+	Unresolved   int // review threads on GitHub that are not resolved
 	AutoReview   int // per-PR choice: 1 on, 0 off, -1 follow the repository's setting
 	Requested    int // 1 my review is requested, 0 it isn't, -1 not tracked (repo scope "all")
 }
@@ -273,6 +278,7 @@ func Open(path string) (*Store, error) {
 		`ALTER TABLE prs ADD COLUMN requested INTEGER NOT NULL DEFAULT -1`,
 		`ALTER TABLE prs ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE prs ADD COLUMN auto_review INTEGER NOT NULL DEFAULT -1`,
+		`ALTER TABLE prs ADD COLUMN unresolved_threads INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return nil, err
@@ -398,7 +404,7 @@ func (s *Store) PolicyFor(repoID int64) Policy {
 const prCols = `p.id, p.repo_id, r.owner||'/'||r.name, p.number, p.title, p.body, p.author,
 	p.author_assoc, p.is_bot, p.url, p.state, p.draft, p.head_sha, p.base_ref, p.additions,
 	p.deletions, p.changed_files, p.ci, p.review_state, p.labels, p.created_at, p.updated_at,
-	p.col, p.col_override, p.override_sha, p.triage, p.triage_sha, p.posted_sha, p.requested, p.avatar, p.auto_review
+	p.col, p.col_override, p.override_sha, p.triage, p.triage_sha, p.posted_sha, p.requested, p.avatar, p.auto_review, p.unresolved_threads
 	FROM prs p JOIN repos r ON r.id = p.repo_id `
 
 func scanPR(sc interface{ Scan(...any) error }) (PR, error) {
@@ -407,7 +413,7 @@ func scanPR(sc interface{ Scan(...any) error }) (PR, error) {
 	err := sc.Scan(&p.ID, &p.RepoID, &p.Repo, &p.Number, &p.Title, &p.Body, &p.Author,
 		&p.AuthorAssoc, &p.IsBot, &p.URL, &p.State, &p.Draft, &p.HeadSHA, &p.BaseRef, &p.Additions,
 		&p.Deletions, &p.ChangedFiles, &p.CI, &p.ReviewState, &labels, &p.CreatedAt, &p.UpdatedAt,
-		&p.Col, &p.ColOverride, &p.OverrideSHA, &triage, &p.AssessedSHA, &p.PostedSHA, &p.Requested, &p.Avatar, &p.AutoReview)
+		&p.Col, &p.ColOverride, &p.OverrideSHA, &triage, &p.AssessedSHA, &p.PostedSHA, &p.Requested, &p.Avatar, &p.AutoReview, &p.Unresolved)
 	if err != nil {
 		return p, err
 	}
@@ -457,19 +463,20 @@ func (s *Store) UpsertPR(p PR) (int64, error) {
 	var id int64
 	err := s.db.QueryRow(`INSERT INTO prs(repo_id, number, title, body, author, author_assoc, is_bot,
 		url, state, draft, head_sha, base_ref, additions, deletions, changed_files, ci, review_state,
-		labels, created_at, updated_at, requested, avatar)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		labels, created_at, updated_at, requested, avatar, unresolved_threads)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(repo_id, number) DO UPDATE SET title=excluded.title, body=excluded.body,
 		author=excluded.author, author_assoc=excluded.author_assoc, is_bot=excluded.is_bot,
 		url=excluded.url, state=excluded.state, draft=excluded.draft, head_sha=excluded.head_sha,
 		base_ref=excluded.base_ref, additions=excluded.additions, deletions=excluded.deletions,
 		changed_files=excluded.changed_files, ci=excluded.ci, review_state=excluded.review_state,
 		labels=excluded.labels, created_at=excluded.created_at, updated_at=excluded.updated_at,
-		requested=excluded.requested, avatar=excluded.avatar
+		requested=excluded.requested, avatar=excluded.avatar,
+		unresolved_threads=excluded.unresolved_threads
 		RETURNING id`,
 		p.RepoID, p.Number, p.Title, p.Body, p.Author, p.AuthorAssoc, p.IsBot, p.URL, p.State,
 		p.Draft, p.HeadSHA, p.BaseRef, p.Additions, p.Deletions, p.ChangedFiles, p.CI,
-		p.ReviewState, toJSON(nonNil(p.Labels)), p.CreatedAt, p.UpdatedAt, p.Requested, p.Avatar).Scan(&id)
+		p.ReviewState, toJSON(nonNil(p.Labels)), p.CreatedAt, p.UpdatedAt, p.Requested, p.Avatar, p.Unresolved).Scan(&id)
 	return id, err
 }
 

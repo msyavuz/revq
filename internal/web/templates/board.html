@@ -44,9 +44,10 @@
       </div>
       <a class="title" href="/pr/{{.PR.ID}}">{{.PR.Title}}</a>
       {{with .PR.Assessment}}<p class="sum"><span>{{.Summary}}</span></p>{{end}}
-      {{if or .Risk .Decision .HasDraft .PR.Draft .Running .Pinned .Large .AutoOn .AutoOff}}
+      {{if or .Risk .Decision .HasDraft .PR.Draft .Running .Pinned .Large .AutoOn .AutoOff .Ready}}
       <div class="marks">
         {{if .Decision}}<span class="mark hl">decision needed</span>{{end}}
+        {{if .Ready}}<span class="mark risk-low" title="The agent read the whole change at this commit and found nothing">looks ready</span>{{end}}
         {{if .HasDraft}}<span class="mark agent">review drafted{{if .DraftStale}}, outdated{{end}}</span>{{end}}
         {{if .Running}}<span class="mark agent">agent {{.Running}}</span>{{end}}
         {{if .Risk}}<span class="mark risk-{{.Risk}}">{{.Risk}} risk</span>{{end}}

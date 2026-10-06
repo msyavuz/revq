@@ -205,6 +205,14 @@ for your review again, it comes back to Inbox.
 "Redraft review" replaces the current draft, including your edits. If the draft says it
 was written before the latest commits, redraft it.
 
+When the agent has read the whole change and found nothing, the draft opens with a
+**Looks ready to merge** block: a few bullets on what the change does and what's worth
+verifying after merge, plus CI, the number of unresolved review threads on GitHub, and
+the PR's review state. It is for you only and is never posted. It means the agent found
+nothing in the diff, not that the change is safe: the agent doesn't run the code.
+Approving is still your click, and revq never approves by itself. The card is marked
+"looks ready" on the board until the author pushes again.
+
 A yellow "Partial review" line means the PR was too big to read whole and tells you how
 many files the agent read.
 

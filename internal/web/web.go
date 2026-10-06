@@ -164,6 +164,7 @@ type card struct {
 	Large      bool
 	Pinned     bool
 	Reviewed   bool // a review was already posted for this exact commit
+	Ready      bool // the agent read the whole change at this commit and found nothing
 	AutoOn     bool // auto review was switched on for this PR specifically
 	AutoOff    bool // auto review was switched off for this PR specifically
 }
@@ -215,6 +216,13 @@ func (s *Server) updateAvailable() string {
 		return tag
 	}
 	return ""
+}
+
+// readyNow reports whether the agent's "looks ready" verdict still applies:
+// it was reached for the commit the PR is on now.
+func readyNow(pr store.PR) bool {
+	a := pr.Assessment
+	return a != nil && a.Ready && pr.State == "open" && pr.AssessedSHA == pr.HeadSHA
 }
 
 // initial is the fallback shown when an author has no profile picture.
@@ -358,6 +366,7 @@ func (s *Server) boardView(f boardFilter) (boardView, error) {
 		if sha, ok := drafts[pr.ID]; ok {
 			c.HasDraft, c.DraftStale = true, sha != pr.HeadSHA
 		}
+		c.Ready = readyNow(pr)
 		c.Reviewed = pr.PostedSHA != "" && pr.PostedSHA == pr.HeadSHA
 		// Only mark exceptions: on where the default is off, off where it is on.
 		byDefault := policyOn[pr.RepoID] || cfg.Trusts(pr.Author)
@@ -435,6 +444,7 @@ func (s *Server) pr(w http.ResponseWriter, r *http.Request) {
 	}
 	active, _ := s.st.ActiveRuns()
 	data["Running"] = active[pr.ID]
+	data["Ready"] = readyNow(pr)
 	policy := s.st.PolicyFor(pr.RepoID)
 	cfg := s.st.Config()
 	data["AutoOn"] = pipeline.AutoReviewOn(pr, policy, cfg)
