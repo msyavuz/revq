@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "Run gofmt on the files above."; exit 1; }
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./cmd/revq
+      - name: Docs site builds
+        run: go run ./docs/build
