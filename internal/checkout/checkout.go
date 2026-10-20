@@ -114,9 +114,14 @@ func (c *Cache) Worktree(ctx context.Context, owner, name string, number int, ba
 	if at == "" {
 		at = pull
 	}
-	if _, err := c.git(ctx, repo, "worktree", "add", "--quiet", "--detach", path, at); err != nil {
+	// Symlinks are written out as plain files holding the link target, so a
+	// PR can't plant a link that points the reviewer at something outside
+	// the checkout. The agent's Read refuses such paths anyway; this removes
+	// the question.
+	add := []string{"-c", "core.symlinks=false", "worktree", "add", "--quiet", "--detach", path}
+	if _, err := c.git(ctx, repo, append(add, at)...); err != nil {
 		// The head moved since the sync; review what GitHub serves under the PR ref.
-		if _, err2 := c.git(ctx, repo, "worktree", "add", "--quiet", "--detach", path, pull); err2 != nil {
+		if _, err2 := c.git(ctx, repo, append(add, pull)...); err2 != nil {
 			return nil, err
 		}
 	}
