@@ -39,6 +39,7 @@ Locally, using your existing `gh` and `claude` logins:
 | `REVQ_ADDR` | `127.0.0.1:8080` | Listen address (`:8080` in the Docker image). |
 | `REVQ_DB` | `revq.db` | SQLite file. |
 | `REVQ_CLAUDE_BIN` | `claude` | Path to the Claude Code CLI. |
+| `REVQ_CACHE` | `checkouts` next to the DB | Where repositories are cloned for the agent to read. |
 
 ## How it works
 
@@ -75,9 +76,13 @@ PR lands in Needs you.
 - A review is one model call per chunk of diff. It skips lockfiles, generated and
   vendored files, packs the rest biggest-change-first into a capped number of chunks, and
   lists anything it left out on the draft.
-- The agent is `claude -p` with no tools, no MCP servers, no settings and its own system
-  prompt, so the fixed overhead is about 1k tokens per call. With no tools, text inside a
-  PR can't make it do anything.
+- The agent is `claude -p` with its own system prompt, no MCP servers and no settings.
+  It gets a read-only checkout of the repository at the PR's head (one blobless clone per
+  repository, kept under `REVQ_CACHE`) and the PR's discussion so far, so it can follow
+  callers, check claims of "fixed", and apply the repository's own `CLAUDE.md`. Its only
+  tools are Read, Grep and Glob, confined to that checkout: text inside a PR can't make
+  it run or change anything. "Review from the diff alone" in Settings turns the checkout
+  off.
 - A daily budget pauses the queue. A pushed commit is not re-reviewed while a draft is
   still waiting for you.
 
@@ -87,8 +92,7 @@ on the Settings page.
 ## Limits
 
 - GitHub only, one account, one token.
-- The reviewer sees the diff, not a checkout of the repository.
-- No automated tests yet.
+- The reviewer reads code but never runs it: no tests, no build, no shell.
 
 ## Contributing
 

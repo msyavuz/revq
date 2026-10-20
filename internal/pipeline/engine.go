@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/msyavuz/revq/internal/agent"
+	"github.com/msyavuz/revq/internal/checkout"
 	"github.com/msyavuz/revq/internal/github"
 	"github.com/msyavuz/revq/internal/notify"
 	"github.com/msyavuz/revq/internal/store"
@@ -24,6 +25,9 @@ type Engine struct {
 	GH    *github.Client
 	Agent agent.Runner
 	Log   *slog.Logger
+	// Checkouts gives reviews a checkout of the repository to read. nil, or
+	// the "diff only" setting, reviews from the diff alone.
+	Checkouts *checkout.Cache
 
 	started time.Time
 	wake    chan struct{}
@@ -465,14 +469,34 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 		return errors.New("nothing reviewable in this PR (only generated files or no diff)")
 	}
 	policy := e.St.PolicyFor(pr.RepoID)
-	var labels []string
+	rc := reviewContext{Guidelines: cfg.Guidelines}
 	if policy.AutoLabel {
-		labels = e.repoLabels(ctx, pr)
+		rc.Labels = e.repoLabels(ctx, pr)
 	}
 	// A partial view needs the whole file list to know what it isn't seeing.
-	overview := ""
 	if len(plan.Chunks) > 1 || len(plan.Skipped) > 0 {
-		overview = fileList(files, noise, 150)
+		rc.Overview = fileList(files, noise, 150)
+	}
+	owner, name, _ := store.SplitRepo(pr.Repo)
+	// The conversation is context, not a hard requirement: a review without it
+	// beats no review.
+	if disc, err := e.GH.Discussion(ctx, owner, name, pr.Number); err != nil {
+		e.Log.Warn("pr discussion", "pr", pr.Number, "err", err)
+	} else {
+		maintainer, _ := e.GH.Viewer(ctx)
+		rc.Discussion = discussionText(disc, pr.Author, maintainer, discussionChars)
+	}
+	system, dir := reviewSystem, ""
+	var tools []string
+	if e.Checkouts != nil && !cfg.DiffOnly {
+		wt, err := e.Checkouts.Worktree(ctx, owner, name, pr.Number, pr.BaseRef, pr.HeadSHA)
+		if err != nil {
+			e.Log.Warn("checkout failed; reviewing from the diff alone", "pr", pr.Number, "err", err)
+		} else {
+			defer wt.Remove()
+			dir, tools, system = wt.Path, agent.ReadOnlyTools, reviewSystem+reviewSystemCheckout
+			rc.Conventions = wt.Conventions(ctx)
+		}
 	}
 
 	draft := store.Draft{PRID: pr.ID, HeadSHA: pr.HeadSHA, Verdict: "APPROVE"}
@@ -489,11 +513,13 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 			ReadyOverview       []string        `json:"ready_overview"`
 		}
 		err := e.call(ctx, run, agent.Request{
-			System:    reviewSystem,
-			Prompt:    reviewPrompt(pr, chunk, overview, i+1, len(plan.Chunks), cfg.Guidelines, labels),
+			System:    system,
+			Prompt:    reviewPrompt(pr, chunk, rc, i+1, len(plan.Chunks)),
 			Model:     cfg.ReviewModel,
 			Schema:    reviewSchema,
 			BudgetUSD: cfg.RunBudgetUSD,
+			Dir:       dir,
+			Tools:     tools,
 		}, &out)
 		if err != nil {
 			return fmt.Errorf("chunk %d/%d: %w", i+1, len(plan.Chunks), err)
@@ -537,8 +563,7 @@ func (e *Engine) review(ctx context.Context, run *store.Run) error {
 		return err
 	}
 	if policy.AutoLabel {
-		if add := newLabels(read.SuggestedLabels, labels, pr.Labels); len(add) > 0 {
-			owner, name, _ := store.SplitRepo(pr.Repo)
+		if add := newLabels(read.SuggestedLabels, rc.Labels, pr.Labels); len(add) > 0 {
 			if err := e.GH.AddLabels(ctx, owner, name, pr.Number, add); err != nil {
 				e.Log.Warn("add labels", "pr", pr.Number, "err", err)
 			}

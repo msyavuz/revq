@@ -22,7 +22,17 @@ type Request struct {
 	Schema     string // JSON Schema the output must satisfy
 	BudgetUSD  float64
 	NoThinking bool // classification-style calls don't need it and it doubles output tokens
+	// Dir is the working directory, typically a checkout of the repository
+	// under review. Empty runs in an empty scratch directory.
+	Dir string
+	// Tools the model may use, e.g. ReadOnlyTools. Empty means none, so the
+	// model can only return text.
+	Tools []string
 }
+
+// ReadOnlyTools let the model read the working directory and nothing else:
+// no shell, no network, no writes.
+var ReadOnlyTools = []string{"Read", "Grep", "Glob"}
 
 type Result struct {
 	Output       json.RawMessage
@@ -37,8 +47,9 @@ type Runner interface {
 
 // ClaudeCode shells out to `claude -p`. The call is stripped down to keep the
 // fixed overhead small: our own system prompt instead of the coding one, no
-// tools, no MCP servers, no settings or CLAUDE.md, no session on disk. With
-// no tools the model can only return text, so PR content can't make it act.
+// MCP servers, no settings or CLAUDE.md, no session on disk. Without tools the
+// model can only return text; with read-only tools it runs restricted, confined
+// to the working directory, so PR content still can't make it act.
 type ClaudeCode struct {
 	Bin     string
 	Timeout time.Duration
@@ -56,7 +67,7 @@ func NewClaudeCode(bin string) (*ClaudeCode, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ClaudeCode{Bin: bin, Timeout: 10 * time.Minute, dir: dir}, nil
+	return &ClaudeCode{Bin: bin, Timeout: 20 * time.Minute, dir: dir}, nil
 }
 
 func (c *ClaudeCode) Run(ctx context.Context, req Request) (Result, error) {
@@ -69,19 +80,28 @@ func (c *ClaudeCode) Run(ctx context.Context, req Request) (Result, error) {
 		"--model", req.Model,
 		"--system-prompt", req.System,
 		"--json-schema", req.Schema,
-		"--tools", "",
+		"--tools", strings.Join(req.Tools, ","),
 		"--strict-mcp-config",
 		"--disable-slash-commands",
 		"--no-session-persistence",
 		"--setting-sources", "",
+	}
+	if len(req.Tools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(req.Tools, ","), "--restricted")
 	}
 	if req.BudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.BudgetUSD, 'f', 2, 64))
 	}
 	cmd := exec.CommandContext(ctx, c.Bin, args...)
 	cmd.Dir = c.dir
+	if req.Dir != "" {
+		cmd.Dir = req.Dir
+	}
+	// The agent only needs its own credentials. revq's GitHub token and
+	// notification secrets have no business in a process that reads PR content.
+	cmd.Env = withoutSecrets(os.Environ())
 	if req.NoThinking {
-		cmd.Env = append(os.Environ(), "MAX_THINKING_TOKENS=0")
+		cmd.Env = append(cmd.Env, "MAX_THINKING_TOKENS=0")
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)
 	var stdout, stderr bytes.Buffer
@@ -128,6 +148,20 @@ func (c *ClaudeCode) Run(ctx context.Context, req Request) (Result, error) {
 		return res, errors.New("claude: no structured output in response")
 	}
 	return res, nil
+}
+
+// withoutSecrets drops revq's own secrets from an environment.
+func withoutSecrets(env []string) []string {
+	out := env[:0:0]
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		switch name {
+		case "GITHUB_TOKEN", "GH_TOKEN", "REVQ_PASSWORD":
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 func tail(s string) string {

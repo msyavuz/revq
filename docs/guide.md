@@ -123,6 +123,7 @@ checksum, and swaps the binary in place. Your data is untouched. To build from s
 | `REVQ_ADDR` | `127.0.0.1:8080` | Address to listen on (`:8080` in the Docker image) |
 | `REVQ_DB` | `revq.db` | Where the SQLite file lives (`/data/revq.db` in the Docker image) |
 | `REVQ_CLAUDE_BIN` | `claude` | Path to the Claude Code command |
+| `REVQ_CACHE` | `checkouts` next to the DB | Where repositories are cloned for the agent to read (`/data/checkouts` in the Docker image) |
 
 ## First sign-in
 
@@ -257,6 +258,10 @@ A review of a few hundred changed lines costs a few cents. These settings contro
 - **Extra paths to keep out of the model.** Lockfiles, generated and vendored files are
   skipped already. Add your own, one pattern per line.
 - **Review guidelines.** Your project's conventions, sent with every review. Keep it short.
+- **Review from the diff alone.** By default the agent gets a read-only checkout of the
+  repository at the PR's commit, so it can read callers and tests beyond the changed
+  lines, plus the PR's discussion so far. That makes reviews better and dearer: more
+  tokens, and tool calls the agent decides on. Tick this to review from the diff only.
 
 ## Notifications
 
@@ -320,6 +325,7 @@ Without Docker, run `./revq reset-password`. This puts the account back to `admi
 ## Limits
 
 - GitHub only, one account, one token.
-- The agent sees the diff, not a checkout of the repository, so it can't follow code
-  outside the changed lines.
+- The agent reads a checkout of the repository but never runs anything in it: no tests,
+  no build, no shell. A large repository costs disk space under `REVQ_CACHE` (a blobless
+  clone plus one checkout at a time) and the first review of it waits for the clone.
 - Raw HTML in a PR description is not shown.

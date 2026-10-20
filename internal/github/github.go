@@ -8,13 +8,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Client struct {
 	Token string
 	HTTP  *http.Client
+
+	mu     sync.Mutex
+	viewer string
 }
 
 func New(token string) *Client {
@@ -346,4 +351,126 @@ func (c *Client) AddLabels(ctx context.Context, owner, name string, number int, 
 func (c *Client) PostReview(ctx context.Context, owner, name string, number int, r Review) error {
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", api, owner, name, number)
 	return c.do(ctx, "POST", url, r, nil)
+}
+
+// Viewer returns the login of the token's owner, cached after the first call.
+func (c *Client) Viewer(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.viewer != "" {
+		return c.viewer, nil
+	}
+	var resp struct{ Login string }
+	if err := c.do(ctx, "GET", api+"/user", nil, &resp); err != nil {
+		return "", err
+	}
+	c.viewer = resp.Login
+	return c.viewer, nil
+}
+
+type Commit struct {
+	SHA     string
+	Message string
+}
+
+// Remark is one thing somebody said on a PR: a review verdict, an inline
+// review comment, or a conversation comment.
+type Remark struct {
+	Kind    string // review, inline, comment
+	Author  string
+	Bot     bool
+	State   string // for reviews: APPROVED, CHANGES_REQUESTED, COMMENTED
+	Path    string // for inline comments
+	Line    int
+	ReplyTo int64
+	ID      int64
+	Body    string
+	At      time.Time
+}
+
+// Discussion is the conversation on a PR so far, oldest first.
+type Discussion struct {
+	Commits []Commit
+	Remarks []Remark
+}
+
+type ghUser struct {
+	Login string
+	Type  string
+}
+
+func (u ghUser) bot() bool { return u.Type == "Bot" || strings.HasSuffix(u.Login, "[bot]") }
+
+// Discussion fetches the commits, reviews, inline comments and conversation
+// comments on a PR. Each list is capped at its first 100 entries; later pages
+// of a very long conversation are dropped, newest included first by sorting.
+func (c *Client) Discussion(ctx context.Context, owner, name string, number int) (Discussion, error) {
+	var d Discussion
+	base := fmt.Sprintf("%s/repos/%s/%s", api, owner, name)
+	var commits []struct {
+		SHA    string `json:"sha"`
+		Commit struct{ Message string }
+	}
+	if err := c.do(ctx, "GET", fmt.Sprintf("%s/pulls/%d/commits?per_page=100", base, number), nil, &commits); err != nil {
+		return d, err
+	}
+	for _, m := range commits {
+		msg, _, _ := strings.Cut(m.Commit.Message, "\n")
+		d.Commits = append(d.Commits, Commit{SHA: m.SHA, Message: msg})
+	}
+	var reviews []struct {
+		ID          int64
+		User        ghUser
+		State       string
+		Body        string
+		SubmittedAt time.Time `json:"submitted_at"`
+	}
+	if err := c.do(ctx, "GET", fmt.Sprintf("%s/pulls/%d/reviews?per_page=100", base, number), nil, &reviews); err != nil {
+		return d, err
+	}
+	for _, r := range reviews {
+		if r.State == "PENDING" {
+			continue
+		}
+		d.Remarks = append(d.Remarks, Remark{Kind: "review", ID: r.ID, Author: r.User.Login, Bot: r.User.bot(),
+			State: r.State, Body: r.Body, At: r.SubmittedAt})
+	}
+	var inline []struct {
+		ID        int64
+		User      ghUser
+		Path      string
+		Line      *int
+		Original  *int  `json:"original_line"`
+		ReplyTo   int64 `json:"in_reply_to_id"`
+		Body      string
+		CreatedAt time.Time `json:"created_at"`
+	}
+	if err := c.do(ctx, "GET", fmt.Sprintf("%s/pulls/%d/comments?per_page=100", base, number), nil, &inline); err != nil {
+		return d, err
+	}
+	for _, r := range inline {
+		line := 0
+		if r.Line != nil {
+			line = *r.Line
+		} else if r.Original != nil {
+			line = *r.Original
+		}
+		d.Remarks = append(d.Remarks, Remark{Kind: "inline", ID: r.ID, Author: r.User.Login, Bot: r.User.bot(),
+			Path: r.Path, Line: line, ReplyTo: r.ReplyTo, Body: r.Body, At: r.CreatedAt})
+	}
+	var comments []struct {
+		ID        int64
+		User      ghUser
+		Body      string
+		CreatedAt time.Time `json:"created_at"`
+	}
+	if err := c.do(ctx, "GET", fmt.Sprintf("%s/issues/%d/comments?per_page=100", base, number), nil, &comments); err != nil {
+		return d, err
+	}
+	for _, r := range comments {
+		d.Remarks = append(d.Remarks, Remark{Kind: "comment", ID: r.ID, Author: r.User.Login, Bot: r.User.bot(),
+			Body: r.Body, At: r.CreatedAt})
+	}
+	sort.SliceStable(d.Remarks, func(i, j int) bool { return d.Remarks[i].At.Before(d.Remarks[j].At) })
+	return d, nil
 }

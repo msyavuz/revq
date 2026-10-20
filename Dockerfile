@@ -13,13 +13,13 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 FROM node:22-slim
 # node:22-slim ships no CA bundle, and the static Go binary reads its roots from
 # /etc/ssl/certs, so without this every api.github.com call fails to verify.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code && npm cache clean --force \
     && mkdir /data && chown node:node /data
 COPY --from=build /revq /usr/local/bin/revq
 USER node
-ENV REVQ_DB=/data/revq.db REVQ_ADDR=:8080
+ENV REVQ_DB=/data/revq.db REVQ_CACHE=/data/checkouts REVQ_ADDR=:8080
 VOLUME /data
 EXPOSE 8080
 ENTRYPOINT ["revq"]

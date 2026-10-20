@@ -71,6 +71,7 @@
       <label>Review chunk size (chars)<input name="review_chunk_chars" value="{{.ReviewChunkChars}}"></label>
       <label>Max review chunks per PR<input name="review_max_chunks" value="{{.ReviewMaxChunks}}"></label>
     </div>
+    <label class="check"><input type="checkbox" name="diff_only"{{if .DiffOnly}} checked{{end}}> Review from the diff alone, without a checkout of the repository (cheaper, shallower)</label>
     <label>Extra paths to keep out of the model (one glob per line; lockfiles, vendored and generated files are already skipped)
       <textarea name="ignore_globs" rows="3" placeholder="docs/static/&#10;*.generated.ts">{{.IgnoreGlobs}}</textarea></label>
   </section>

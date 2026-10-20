@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/msyavuz/revq/internal/agent"
+	"github.com/msyavuz/revq/internal/checkout"
 	"github.com/msyavuz/revq/internal/github"
 	"github.com/msyavuz/revq/internal/pipeline"
 	"github.com/msyavuz/revq/internal/store"
@@ -108,7 +110,8 @@ func run(log *slog.Logger) error {
 	if token == "" {
 		return errors.New("no GitHub token: set GITHUB_TOKEN or log in with gh")
 	}
-	st, err := store.Open(env("REVQ_DB", "revq.db"))
+	dbPath := env("REVQ_DB", "revq.db")
+	st, err := store.Open(dbPath)
 	if err != nil {
 		return err
 	}
@@ -127,6 +130,11 @@ func run(log *slog.Logger) error {
 	defer stop()
 
 	eng := pipeline.New(st, github.New(token), ag, log)
+	if err := checkout.Available(); err != nil {
+		log.Warn("reviews run from the diff alone", "reason", err)
+	} else {
+		eng.Checkouts = checkout.New(env("REVQ_CACHE", filepath.Join(filepath.Dir(dbPath), "checkouts")), token)
+	}
 	eng.Start(ctx)
 
 	addr := env("REVQ_ADDR", "127.0.0.1:8080")
