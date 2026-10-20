@@ -258,6 +258,10 @@ A review of a few hundred changed lines costs a few cents. These settings contro
 - **Extra paths to keep out of the model.** Lockfiles, generated and vendored files are
   skipped already. Add your own, one pattern per line.
 - **Review guidelines.** Your project's conventions, sent with every review. Keep it short.
+- **Review from the diff alone.** By default the agent gets a read-only checkout of the
+  repository at the PR's commit, so it can read callers and tests beyond the changed
+  lines, plus the PR's discussion so far. That makes reviews better and dearer: more
+  tokens, and tool calls the agent decides on. Tick this to review from the diff only.
 
 ## Notifications
 
