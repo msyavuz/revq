@@ -105,6 +105,9 @@ func reviewPrompt(pr store.PR, chunk string, rc reviewContext, part, parts int) 
 	return b.String()
 }
 
+// lineBreaks folds every line terminator a comment could contain into \n.
+var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\v", "\n", "\f", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n")
+
 // discussionText renders a PR's commits and conversation for the prompt, oldest
 // first. Bots are left out. The PR author is marked, and so is the maintainer
 // (the token's owner) since their earlier comments are the ones a draft
@@ -130,8 +133,9 @@ func discussionText(d github.Discussion, author, maintainer string, max int) str
 			continue
 		}
 		// Bodies are indented so a remark can't forge a new entry: every
-		// line that starts at the margin was written by this code.
-		body := strings.ReplaceAll(clip(r.Body, remarkChars), "\n", "\n    ")
+		// line that starts at the margin was written by this code. Every
+		// kind of line break counts, not just \n.
+		body := strings.ReplaceAll(lineBreaks.Replace(clip(r.Body, remarkChars)), "\n", "\n    ")
 		var line string
 		switch r.Kind {
 		case "review":
