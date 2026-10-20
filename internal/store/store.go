@@ -98,14 +98,16 @@ type Config struct {
 	RunBudgetUSD     float64 `json:"run_budget_usd"`
 	ReviewChunkChars int     `json:"review_chunk_chars"`
 	ReviewMaxChunks  int     `json:"review_max_chunks"`
-	ReviewBots       bool    `json:"review_bots"`
-	ReviewDrafts     bool    `json:"review_drafts"`
-	TrustedAuthors   string  `json:"trusted_authors"` // GitHub usernames, one per line
-	IgnoreGlobs      string  `json:"ignore_globs"`
-	Guidelines       string  `json:"guidelines"`
-	WebhookURL       string  `json:"webhook_url"`
-	TelegramToken    string  `json:"telegram_token"`
-	TelegramChatID   string  `json:"telegram_chat_id"`
+	// DiffOnly reviews from the diff alone instead of a checkout of the repository.
+	DiffOnly       bool   `json:"diff_only"`
+	ReviewBots     bool   `json:"review_bots"`
+	ReviewDrafts   bool   `json:"review_drafts"`
+	TrustedAuthors string `json:"trusted_authors"` // GitHub usernames, one per line
+	IgnoreGlobs    string `json:"ignore_globs"`
+	Guidelines     string `json:"guidelines"`
+	WebhookURL     string `json:"webhook_url"`
+	TelegramToken  string `json:"telegram_token"`
+	TelegramChatID string `json:"telegram_chat_id"`
 }
 
 // AuthorList returns the trusted usernames, trimmed, without blanks or a leading @.
@@ -146,12 +148,12 @@ func (c *Config) SetTrust(login string, trusted bool) {
 
 func DefaultConfig() Config {
 	return Config{
-		ReviewModel:      "sonnet",
+		ReviewModel:      "opus",
 		PollSeconds:      120,
 		StaleDays:        30,
 		DailyBudgetUSD:   3,
 		RunBudgetUSD:     1,
-		ReviewChunkChars: 120000,
+		ReviewChunkChars: 300000,
 		ReviewMaxChunks:  3,
 	}
 }

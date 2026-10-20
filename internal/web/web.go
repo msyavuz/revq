@@ -695,6 +695,7 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	c.RunBudgetUSD = usd("run_budget_usd", c.RunBudgetUSD)
 	c.ReviewChunkChars = num("review_chunk_chars", c.ReviewChunkChars)
 	c.ReviewMaxChunks = num("review_max_chunks", c.ReviewMaxChunks)
+	c.DiffOnly = r.FormValue("diff_only") != ""
 	c.ReviewBots = r.FormValue("review_bots") != ""
 	c.ReviewDrafts = r.FormValue("review_drafts") != ""
 	c.TrustedAuthors = r.FormValue("trusted_authors")
