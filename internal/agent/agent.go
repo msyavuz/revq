@@ -97,8 +97,11 @@ func (c *ClaudeCode) Run(ctx context.Context, req Request) (Result, error) {
 	if req.Dir != "" {
 		cmd.Dir = req.Dir
 	}
+	// The agent only needs its own credentials. revq's GitHub token and
+	// notification secrets have no business in a process that reads PR content.
+	cmd.Env = withoutSecrets(os.Environ())
 	if req.NoThinking {
-		cmd.Env = append(os.Environ(), "MAX_THINKING_TOKENS=0")
+		cmd.Env = append(cmd.Env, "MAX_THINKING_TOKENS=0")
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)
 	var stdout, stderr bytes.Buffer
@@ -145,6 +148,20 @@ func (c *ClaudeCode) Run(ctx context.Context, req Request) (Result, error) {
 		return res, errors.New("claude: no structured output in response")
 	}
 	return res, nil
+}
+
+// withoutSecrets drops revq's own secrets from an environment.
+func withoutSecrets(env []string) []string {
+	out := env[:0:0]
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		switch name {
+		case "GITHUB_TOKEN", "GH_TOKEN", "REVQ_PASSWORD":
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 func tail(s string) string {
