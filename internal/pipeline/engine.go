@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -167,8 +168,15 @@ func (e *Engine) syncRepo(ctx context.Context, r store.Repo) error {
 		}
 		checked++
 		state, err := e.GH.PRState(ctx, r.Owner, r.Name, pr.Number)
-		if err != nil {
-			return err
+		var apiErr *github.APIError
+		switch {
+		case errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound:
+			// Deleted, or moved out of reach. Either way it's off the board.
+			state = "closed"
+		case err != nil:
+			// One PR's trouble shouldn't stop the rest from being checked.
+			e.Log.Warn("pr state", "repo", r.Full(), "pr", pr.Number, "err", err)
+			continue
 		}
 		if state == "open" {
 			state = "stale"
