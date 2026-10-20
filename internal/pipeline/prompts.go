@@ -129,7 +129,9 @@ func discussionText(d github.Discussion, author, maintainer string, max int) str
 		if r.Bot || strings.TrimSpace(r.Body) == "" && r.Kind != "review" {
 			continue
 		}
-		body := clip(r.Body, remarkChars)
+		// Bodies are indented so a remark can't forge a new entry: every
+		// line that starts at the margin was written by this code.
+		body := strings.ReplaceAll(clip(r.Body, remarkChars), "\n", "\n    ")
 		var line string
 		switch r.Kind {
 		case "review":
