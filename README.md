@@ -93,7 +93,6 @@ on the Settings page.
 
 - GitHub only, one account, one token.
 - The reviewer reads code but never runs it: no tests, no build, no shell.
-- No automated tests yet.
 
 ## Contributing
 
